@@ -26,7 +26,19 @@
     "camera": {
         "topic": "/camera/color/image_raw",
         "msg_type": "sensor_msgs/Image",
-        "description": "无人机摄像头图像",
+        "description": "无人机RGB摄像头图像",
+        "fields": ["data", "encoding", "width", "height"]
+    },
+    "depth": {
+        "topic": "/camera/depth_aligned_to_color_and_infra1/image_raw",
+        "msg_type": "sensor_msgs/Image",
+        "description": "无人机深度摄像头图像",
+        "fields": ["data", "encoding", "width", "height"]
+    },
+    "bird_view": {
+        "topic": "/onboard_detector/bird_view",
+        "msg_type": "sensor_msgs/Image",
+        "description": "障碍物鸟瞰图",
         "fields": ["data", "encoding", "width", "height"]
     }
 } 

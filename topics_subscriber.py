@@ -62,6 +62,12 @@ class TopicsSubscriber:
                 "width": 0,
                 "height": 0,
                 "encoding": ""
+            },
+            "depth": {
+                "image": None,  # 存储OpenCV格式的深度图像
+                "width": 0,
+                "height": 0,
+                "encoding": ""
             }
         }
         
@@ -77,7 +83,8 @@ class TopicsSubscriber:
             "status": False,
             "odometry": False,
             "velocity": False,
-            "camera": False
+            "camera": False,
+            "depth": False
         }
         
         # 初始化cv_bridge
@@ -189,6 +196,40 @@ class TopicsSubscriber:
                     rospy.loginfo(f"成功订阅图像话题: {self.config['camera']['topic']}")
                 except Exception as e:
                     rospy.logerr(f"订阅图像话题失败: {str(e)}")
+                    
+        # 检查并订阅深度图像话题
+        if "depth" in self.config and self.config["depth"]["topic"] in published_topics:
+            if "depth" not in self.subscribers or not self.subscribers["depth"]:
+                try:
+                    self.subscribers["depth"] = rospy.Subscriber(
+                        self.config["depth"]["topic"],
+                        Image,
+                        self.depth_callback
+                    )
+                    self.topics_active["depth"] = True
+                    rospy.loginfo(f"成功订阅深度图像话题: {self.config['depth']['topic']}")
+                except Exception as e:
+                    rospy.logerr(f"订阅深度图像话题失败: {str(e)}")
+        
+        # 检查并订阅鸟瞰图话题
+        if "bird_view" in self.config:
+            # 尝试强制订阅鸟瞰图话题，不管是否在已发布话题列表中
+            if "bird_view" not in self.subscribers or not self.subscribers["bird_view"]:
+                try:
+                    print(f"尝试订阅鸟瞰图话题: {self.config['bird_view']['topic']}")
+                    self.subscribers["bird_view"] = rospy.Subscriber(
+                        self.config["bird_view"]["topic"],
+                        Image,
+                        self.bird_view_callback,
+                        queue_size=1
+                    )
+                    self.topics_active["bird_view"] = True
+                    rospy.loginfo(f"成功订阅鸟瞰图话题: {self.config['bird_view']['topic']}")
+                    # print(f"鸟瞰图话题订阅状态: {self.topics_active['bird_view']}")
+                except Exception as e:
+                    rospy.logerr(f"订阅鸟瞰图话题失败: {str(e)}")
+                    print(f"订阅鸟瞰图话题时出错: {str(e)}")
+                    self.topics_active["bird_view"] = False
     
     def battery_callback(self, msg):
         """电池状态话题回调函数"""
@@ -330,6 +371,57 @@ class TopicsSubscriber:
             rospy.logerr(f"转换图像数据时出错: {str(e)}")
         except Exception as e:
             rospy.logerr(f"处理图像数据时出错: {str(e)}")
+    
+    def depth_callback(self, msg):
+        """深度图像话题回调函数"""
+        try:
+            # 将ROS图像消息转换为OpenCV图像
+            cv_image = self.bridge.imgmsg_to_cv2(msg)
+            
+            # 存储图像和相关信息
+            self.data["depth"]["image"] = cv_image
+            self.data["depth"]["width"] = msg.width
+            self.data["depth"]["height"] = msg.height
+            self.data["depth"]["encoding"] = msg.encoding
+            
+            # 触发注册的回调函数
+            if "depth" in self.callbacks:
+                for callback in self.callbacks["depth"]:
+                    callback(self.data["depth"])
+                    
+        except CvBridgeError as e:
+            rospy.logerr(f"转换深度图像失败: {str(e)}")
+        except Exception as e:
+            rospy.logerr(f"处理深度图像时出错: {str(e)}")
+            
+    def bird_view_callback(self, msg):
+        """鸟瞰图话题回调函数"""
+        try:            
+            # 将ROS图像消息转换为OpenCV图像
+            cv_image = self.bridge.imgmsg_to_cv2(msg)
+            
+            # 如果self.data中还没有bird_view字段，先创建它
+            if "bird_view" not in self.data:
+                self.data["bird_view"] = {
+                    "image": None,
+                    "width": 0,
+                    "height": 0,
+                    "encoding": ""
+                }
+            
+            # 存储图像和相关信息
+            self.data["bird_view"]["image"] = cv_image
+            self.data["bird_view"]["width"] = msg.width
+            self.data["bird_view"]["height"] = msg.height
+            self.data["bird_view"]["encoding"] = msg.encoding
+            
+            # 触发注册的回调函数
+            if "bird_view" in self.callbacks:
+                for callback in self.callbacks["bird_view"]:
+                    callback(self.data["bird_view"])
+                    
+        except CvBridgeError as e:
+            print(f"转换鸟瞰图失败: {str(e)}")
     
     def register_callback(self, topic_name, callback):
         """注册回调函数，当话题数据更新时触发"""

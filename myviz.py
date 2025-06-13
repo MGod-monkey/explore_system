@@ -76,6 +76,8 @@ class MyViz( QWidget ):
         
         # 图像显示相关变量
         self.camera_image = None
+        self.depth_image = None
+        self.bird_view_image = None
         
         # 设置窗口样式，使用黑蓝色调
         self.setStyleSheet("""
@@ -761,18 +763,149 @@ class MyViz( QWidget ):
         self.right_sidebar.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)  # 设置固定宽度策略
         right_sidebar_layout = QVBoxLayout(self.right_sidebar)
         right_sidebar_layout.setContentsMargins(5, 5, 5, 5)  # 设置较小的边距
-        right_sidebar_layout.setSpacing(10)  # 设置组件间距
+        right_sidebar_layout.setSpacing(0)  # 去除组件间距
+        
+        # 添加标题（已移除文本）
+        image_title = QLabel("")
+        image_title.setStyleSheet("padding: 0px;")
+        image_title.setAlignment(Qt.AlignCenter)
+        
+        # 添加弹性空间在顶部
+        right_sidebar_layout.addStretch(1)
+        
+        # 在底部添加图像显示区域和控制按钮
+        image_display_container = QWidget()
+        image_display_layout = QVBoxLayout(image_display_container)
+        image_display_layout.setContentsMargins(0, 0, 0, 0)
+        image_display_layout.setSpacing(0)  # 去除组件间距
+        
+        # 创建鸟瞰图显示区域
+        bird_view_container = QWidget()
+        bird_view_layout = QVBoxLayout(bird_view_container)
+        bird_view_layout.setContentsMargins(0, 0, 0, 0)
+        bird_view_layout.setSpacing(0)
+        
+        # 鸟瞰图标签
+        bird_view_title = QLabel("障碍物鸟瞰图")
+        bird_view_title.setStyleSheet("font-size: 10pt; font-weight: bold; color: #3498DB; background-color: #2C3E50; padding: 5px;")
+        bird_view_title.setAlignment(Qt.AlignCenter)
+        bird_view_title.setFixedHeight(30)
+        bird_view_layout.addWidget(bird_view_title)
+        
+        # 鸟瞰图显示
+        self.bird_view_label = QLabel()
+        self.bird_view_label.setAlignment(Qt.AlignCenter)
+        self.bird_view_label.setFixedSize(640, 240)  # 固定尺寸为640x240
+        self.bird_view_label.setStyleSheet("background-color: #1A202C; border: 1px solid #3498DB; border-top: none;")
+        self.bird_view_label.setText("等待鸟瞰图数据...")
+        bird_view_layout.addWidget(self.bird_view_label)
+        
+        # 添加鸟瞰图容器到图像显示容器
+        image_display_layout.addWidget(bird_view_container)
+        
+        # 添加一个小间隔
+        spacer = QWidget()
+        spacer.setFixedHeight(5)  # 减小间隔
+        image_display_layout.addWidget(spacer)
+        
+        # 创建按钮区域 - 平行四边形按钮
+        button_container = QWidget()
+        button_layout = QHBoxLayout(button_container)
+        button_layout.setContentsMargins(0, 0, 0, 0)
+        button_layout.setSpacing(0)  # 按钮之间无间距
+        
+        # 设置按钮容器高度
+        button_container.setFixedHeight(30)
+        
+        # RGB图像按钮 - 深色
+        self.rgb_button = QPushButton("RGB图像")
+        self.rgb_button.setStyleSheet("""
+            QPushButton {
+                background-color: #2C3E50;  /* 深色 */
+                color: white;
+                border-radius: 0;  /* 无圆角 */
+                border: none;
+                font-weight: bold;
+                font-size: 10pt;  /* 固定字体大小 */
+                padding: 2px;
+                min-width: 320px;
+                text-align: center;
+            }
+            QPushButton:hover {
+                background-color: #234567;
+            }
+            QPushButton:checked {
+                background-color: #1A202C;  /* 选中时更深的颜色 */
+                color: white;
+                border-radius: 0;  /* 无圆角 */
+                border: none;
+                font-weight: bold;
+                font-size: 10pt;  /* 固定字体大小 */
+                padding: 2px;
+                min-width: 320px;
+                text-align: center;
+            }
+        """)
+        self.rgb_button.setCheckable(True)
+        self.rgb_button.setChecked(True)
+        self.rgb_button.clicked.connect(self.switchToRGBImage)
+        button_layout.addWidget(self.rgb_button)
+        
+        # 深度图像按钮 - 浅色
+        self.depth_button = QPushButton("深度图像")
+        self.depth_button.setStyleSheet("""
+            QPushButton {
+                background-color: #3498DB;  /* 浅色 */
+                color: white;
+                border-radius: 0;  /* 无圆角 */
+                border: none;
+                font-weight: bold;
+                font-size: 10pt;  /* 固定字体大小 */
+                padding: 2px;
+                min-width: 320px;
+                text-align: center;
+            }
+            QPushButton:hover {
+                background-color: #2980B9;
+            }
+            QPushButton:checked {
+                background-color: #1A202C;  /* 选中时更深的颜色 */
+                color: white;
+                border-radius: 0;  /* 无圆角 */
+                border: none;
+                font-weight: bold;
+                font-size: 10pt;  /* 固定字体大小 */
+                padding: 2px;
+                min-width: 320px;
+                text-align: center;
+            }
+        """)
+        self.depth_button.setCheckable(True)
+        self.depth_button.clicked.connect(self.switchToDepthImage)
+        button_layout.addWidget(self.depth_button)
+        
+        # 添加按钮容器到图像显示布局
+        image_display_layout.addWidget(button_container)
 
         # 创建图像显示区域
         self.image_label = QLabel()
         self.image_label.setAlignment(Qt.AlignCenter)
-        self.image_label.setFixedSize(640, 480)  # 恢复原始尺寸为640x480
-        self.image_label.setStyleSheet("background-color: #1A202C; border: 1px solid #3498DB;")
+        self.image_label.setFixedSize(640, 480)  # 固定尺寸为640x480
+        self.image_label.setStyleSheet("background-color: #1A202C; border: 1px solid #3498DB; border-top: none;")
         self.image_label.setText("等待图像...")
-        right_sidebar_layout.addWidget(self.image_label, 0, Qt.AlignCenter)
+        image_display_layout.addWidget(self.image_label)
         
-        # 添加弹性空间
-        right_sidebar_layout.addStretch(1)
+        # 添加图像显示容器（移除标题）
+        right_sidebar_layout.addWidget(image_display_container, 0, Qt.AlignCenter)
+        
+        # 设置当前图像类型
+        self.current_image_mode = "rgb"  # 默认显示RGB图像
+        
+        # 深度图像数据
+        self.depth_image = None
+        
+        # 鸟瞰图数据
+        self.bird_view_image = None
 
         # 添加右侧栏到主分割器
         self.main_splitter.addWidget(self.right_sidebar)
@@ -846,6 +979,8 @@ class MyViz( QWidget ):
             self.topic_subscriber.register_callback("velocity", self.updateVelocityDisplay)
             self.topic_subscriber.register_callback("status", self.updateStatusDisplay)
             self.topic_subscriber.register_callback("camera", self.updateCameraImage)
+            self.topic_subscriber.register_callback("depth", self.updateDepthImage)
+            self.topic_subscriber.register_callback("bird_view", self.updateBirdViewImage)
             print("话题订阅器已启动，将在后台自动连接可用话题...")
         except Exception as e:
             print(f"初始化话题订阅器失败: {str(e)}")
@@ -1039,8 +1174,8 @@ class MyViz( QWidget ):
     def updateImageDisplay(self):
         """更新图像显示"""
         try:
-            if self.camera_image is not None:
-                # 将OpenCV图像转换为Qt图像
+            if self.current_image_mode == "rgb" and self.camera_image is not None:
+                # 显示RGB图像
                 height, width, channel = self.camera_image.shape
                 bytes_per_line = 3 * width
                 
@@ -1060,13 +1195,62 @@ class MyViz( QWidget ):
                     Qt.KeepAspectRatio, 
                     Qt.SmoothTransformation
                 ))
+            elif self.current_image_mode == "depth" and self.depth_image is not None:
+                # 显示深度图像
+                # 规范化深度图像以便可视化
+                cv_img = self.depth_image.copy()
+                
+                # 检查图像类型和通道
+                if len(cv_img.shape) == 2:  # 单通道深度图
+                    # 归一化到0-255，用于可视化
+                    min_val, max_val, _, _ = cv2.minMaxLoc(cv_img)
+                    if max_val > min_val:
+                        cv_img = cv2.convertScaleAbs(cv_img, alpha=255.0/(max_val-min_val), beta=-min_val*255.0/(max_val-min_val))
+                    
+                    # 应用彩色映射以便更好地可视化
+                    cv_img = cv2.applyColorMap(cv_img, cv2.COLORMAP_JET)
+                    
+                    # 将BGR转换为RGB格式
+                    cv_img = cv2.cvtColor(cv_img, cv2.COLOR_BGR2RGB)
+                    
+                    height, width, channel = cv_img.shape
+                    bytes_per_line = 3 * width
+                    
+                    # 创建QImage
+                    q_image = QImage(cv_img.data, width, height, bytes_per_line, QImage.Format_RGB888)
+                else:  # 已经是3通道图像
+                    height, width, channel = cv_img.shape
+                    bytes_per_line = 3 * width
+                    
+                    # 将BGR转换为RGB格式
+                    cv_img = cv2.cvtColor(cv_img, cv2.COLOR_BGR2RGB)
+                    
+                    # 创建QImage
+                    q_image = QImage(cv_img.data, width, height, bytes_per_line, QImage.Format_RGB888)
+                
+                # 创建QPixmap并设置到标签
+                pixmap = QPixmap.fromImage(q_image)
+                
+                # 设置图像到标签，保持宽高比
+                self.image_label.setPixmap(pixmap.scaled(
+                    640, 
+                    480,
+                    Qt.KeepAspectRatio, 
+                    Qt.SmoothTransformation
+                ))
             else:
                 # 无图像时显示默认文本
                 if hasattr(self, 'image_label') and self.image_label:
-                    if not self.topic_subscriber or not self.topic_subscriber.is_topic_active("camera"):
-                        self.image_label.setText("等待图像话题连接...")
-                    else:
-                        self.image_label.setText("等待图像数据...")
+                    if self.current_image_mode == "rgb":
+                        if not self.topic_subscriber or not self.topic_subscriber.is_topic_active("camera"):
+                            self.image_label.setText("等待RGB图像话题连接...")
+                        else:
+                            self.image_label.setText("等待RGB图像数据...")
+                    else:  # depth模式
+                        if not self.topic_subscriber or not self.topic_subscriber.is_topic_active("depth"):
+                            self.image_label.setText("等待深度图像话题连接...")
+                        else:
+                            self.image_label.setText("等待深度图像数据...")
         except Exception as e:
             print(f"更新图像显示时出错: {str(e)}")
             self.image_label.setText(f"图像显示错误: {str(e)}")
@@ -1181,21 +1365,21 @@ class MyViz( QWidget ):
                 self.mode_label.setText(random.choice(modes))
             
             # 模拟图像生成 - 仅在没有真实图像数据时
+            if not hasattr(self, 'sim_image_count'):
+                self.sim_image_count = 0
+                
+            # 创建模拟RGB图像
             if not self.topic_subscriber or not self.topic_subscriber.is_topic_active("camera"):
-                if not hasattr(self, 'sim_image_count'):
-                    self.sim_image_count = 0
-                    
-                # 创建模拟图像
                 width, height = 640, 480
-                sim_image = np.zeros((height, width, 3), dtype=np.uint8)
+                sim_rgb_image = np.zeros((height, width, 3), dtype=np.uint8)
                 
                 # 添加背景色 - 深蓝色
-                sim_image[:, :] = [25, 35, 45]  # BGR格式
+                sim_rgb_image[:, :] = [25, 35, 45]  # BGR格式
                 
                 # 添加渐变效果
                 for y in range(height):
                     factor = y / height
-                    sim_image[y, :] = [
+                    sim_rgb_image[y, :] = [
                         min(255, int(25 + 30 * factor)),
                         min(255, int(35 + 40 * factor)),
                         min(255, int(45 + 50 * factor))
@@ -1204,8 +1388,8 @@ class MyViz( QWidget ):
                 # 添加文本 - 显示模拟模式
                 font = cv2.FONT_HERSHEY_SIMPLEX
                 cv2.putText(
-                    sim_image,
-                    "模拟图像模式",
+                    sim_rgb_image,
+                    "RGB模拟图像模式",
                     (width//2 - 100, height//2 - 30),
                     font, 1,
                     (255, 255, 255),
@@ -1215,7 +1399,7 @@ class MyViz( QWidget ):
                 
                 # 添加时间戳
                 cv2.putText(
-                    sim_image,
+                    sim_rgb_image,
                     f"时间: {time.time():.2f}",
                     (width//2 - 80, height//2 + 10),
                     font, 0.7,
@@ -1230,14 +1414,137 @@ class MyViz( QWidget ):
                 radius = 100
                 center_x = width//2 + int(radius * math.cos(angle))
                 center_y = height//2 + int(radius * math.sin(angle))
-                cv2.circle(sim_image, (center_x, center_y), 10, (0, 165, 255), -1)
+                cv2.circle(sim_rgb_image, (center_x, center_y), 10, (0, 165, 255), -1)
                 
                 # 添加扫描线效果
                 scan_line = int((height - 1) * (0.5 + 0.5 * math.sin(time.time() * 2)))
-                sim_image[scan_line, :] = [100, 200, 255]
+                sim_rgb_image[scan_line, :] = [100, 200, 255]
                 
-                # 设置模拟图像
-                self.camera_image = sim_image
+                # 设置模拟RGB图像
+                self.camera_image = sim_rgb_image
+                
+            # 创建模拟深度图像
+            if not self.topic_subscriber or not self.topic_subscriber.is_topic_active("depth"):
+                width, height = 640, 480
+                # 创建模拟深度图 - 单通道16位图像
+                sim_depth_image = np.zeros((height, width), dtype=np.uint16)
+                
+                # 创建深度渐变效果 - 从近到远
+                for y in range(height):
+                    for x in range(width):
+                        # 计算到中心的距离
+                        dx = x - width // 2
+                        dy = y - height // 2
+                        distance = math.sqrt(dx*dx + dy*dy)
+                        
+                        # 基于距离和时间创建波纹效果
+                        wave = math.sin(distance * 0.1 - time.time() * 3) * 0.5 + 0.5
+                        depth_value = int(5000 + wave * 10000)  # 模拟5000-15000范围的深度值 (单位: mm)
+                        sim_depth_image[y, x] = depth_value
+                
+                # 创建模拟障碍物 - 近处物体 (黑色)
+                obstacle_radius = 50 + int(20 * math.sin(time.time() * 2))
+                cv2.circle(sim_depth_image, 
+                          (width//2 + 100, height//2 - 50), 
+                          obstacle_radius, 
+                          1000,  # 近距离值
+                          -1)    # 填充圆
+                
+                # 添加模拟人物轮廓 - 中等距离
+                person_y = height//2 + 50
+                person_x = width//2 - 100 + int(50 * math.sin(time.time() * 1.5))
+                # 头部
+                cv2.circle(sim_depth_image, 
+                          (person_x, person_y - 60), 
+                          20, 
+                          3000,  # 中等距离值
+                          -1)
+                # 身体
+                cv2.rectangle(sim_depth_image,
+                             (person_x - 20, person_y - 40),
+                             (person_x + 20, person_y + 40),
+                             3000,
+                             -1)
+                                
+                # 设置模拟深度图像
+                self.depth_image = sim_depth_image
+                
+            # 创建模拟鸟瞰图
+            if not self.topic_subscriber or not self.topic_subscriber.is_topic_active("bird_view"):
+                width, height = 640, 240
+                # 创建模拟鸟瞰图 - 3通道彩色图像
+                sim_bird_view = np.zeros((height, width, 3), dtype=np.uint8)
+                
+                # 背景 - 黑色
+                sim_bird_view[:, :] = [0, 0, 0]  # 黑色背景
+                
+                # 创建模拟栅格地图
+                cell_size = 20  # 每个栅格的大小
+                for y in range(0, height, cell_size):
+                    for x in range(0, width, cell_size):
+                        # 创建棋盘格效果
+                        if (x // cell_size + y // cell_size) % 2 == 0:
+                            sim_bird_view[y:y+cell_size, x:x+cell_size] = [20, 20, 20]  # 深灰色
+                
+                # 绘制中心坐标系
+                center_x, center_y = width // 2, height // 2
+                # X轴(红色)
+                cv2.line(sim_bird_view, (center_x, center_y), (center_x + 100, center_y), (0, 0, 200), 2)
+                # Y轴(绿色)
+                cv2.line(sim_bird_view, (center_x, center_y), (center_x, center_y - 50), (0, 200, 0), 2)
+                
+                # 绘制无人机位置(当前位置)
+                cv2.circle(sim_bird_view, (center_x, center_y), 10, (0, 255, 255), -1)  # 黄色圆点
+                
+                # 绘制无人机朝向
+                angle = time.time() * 0.5  # 随时间旋转
+                direction_x = int(30 * math.cos(angle))
+                direction_y = int(30 * math.sin(angle))
+                cv2.line(sim_bird_view, 
+                        (center_x, center_y), 
+                        (center_x + direction_x, center_y - direction_y), 
+                        (0, 255, 255), 2)
+                
+                # 添加模拟障碍物
+                for i in range(5):  # 5个障碍物
+                    # 障碍物位置随时间变化
+                    obs_angle = math.pi * 2 * i / 5 + time.time() * 0.2
+                    obs_distance = 80 + 40 * math.sin(time.time() * 0.5 + i)
+                    obs_x = center_x + int(obs_distance * math.cos(obs_angle))
+                    obs_y = center_y - int(obs_distance * math.sin(obs_angle))
+                    
+                    # 绘制障碍物(红色)
+                    cv2.circle(sim_bird_view, (obs_x, obs_y), 8, (0, 0, 255), -1)
+                
+                # 添加文字标注
+                font = cv2.FONT_HERSHEY_SIMPLEX
+                cv2.putText(
+                    sim_bird_view,
+                    "障碍物鸟瞰图(模拟)",
+                    (10, 30),
+                    font, 0.8,
+                    (255, 255, 255),
+                    1,
+                    cv2.LINE_AA
+                )
+                
+                # 添加比例尺
+                cv2.line(sim_bird_view, (width - 110, height - 20), (width - 10, height - 20), (200, 200, 200), 2)
+                cv2.putText(
+                    sim_bird_view,
+                    "5米",
+                    (width - 70, height - 30),
+                    font, 0.6,
+                    (200, 200, 200),
+                    1,
+                    cv2.LINE_AA
+                )
+                
+                # 设置模拟鸟瞰图
+                self.bird_view_image = sim_bird_view
+                
+                # 更新显示
+                self.updateBirdViewDisplay()
         
         # 每次渲染帧时增加计数器
         self.frame_count += 1
@@ -1313,6 +1620,126 @@ class MyViz( QWidget ):
         except Exception as e:
             print(f"切换日志窗口时出错: {str(e)}")
             self.log_button.setChecked(False)
+
+    def switchToRGBImage(self):
+        """切换到RGB图像模式"""
+        self.rgb_button.setChecked(True)
+        self.depth_button.setChecked(False)
+        self.current_image_mode = "rgb"
+        # 直接调整背景色而不重设整个样式
+        self.rgb_button.setStyleSheet("background-color: #1A202C; font-size: 10pt;")
+        self.depth_button.setStyleSheet("background-color: #3498DB; font-size: 10pt;")
+        # 更新显示
+        self.updateImageDisplay()
+    
+    def switchToDepthImage(self):
+        """切换到深度图像模式"""
+        self.rgb_button.setChecked(False)
+        self.depth_button.setChecked(True)
+        self.current_image_mode = "depth"
+        # 直接调整背景色而不重设整个样式
+        self.depth_button.setStyleSheet("background-color: #1A202C; font-size: 10pt;")
+        self.rgb_button.setStyleSheet("background-color: #3498DB; font-size: 10pt;")
+        # 更新显示
+        self.updateImageDisplay()
+    
+    def updateDepthImage(self, depth_data):
+        """处理深度图像更新"""
+        try:
+            if not depth_data or depth_data["image"] is None:
+                return
+                
+            # 保存最新深度图像
+            self.depth_image = depth_data["image"]
+            
+            # 如果当前是深度图像模式，立即更新显示
+            if self.current_image_mode == "depth" and hasattr(self, 'image_label'):
+                self.updateImageDisplay()
+                
+        except Exception as e:
+            print(f"处理深度图像更新时出错: {str(e)}")
+
+    def updateBirdViewImage(self, bird_view_data):
+        """处理鸟瞰图更新"""
+        try:
+            if not bird_view_data or bird_view_data["image"] is None:
+                return
+                
+            # 保存最新鸟瞰图像
+            self.bird_view_image = bird_view_data["image"]
+                
+            # 输出图像信息
+            self.updateBirdViewDisplay()
+                
+        except Exception as e:
+            import traceback
+            print(f"处理鸟瞰图更新时出错: {str(e)}")
+            print(traceback.format_exc())
+    
+    def updateBirdViewDisplay(self):
+        """更新鸟瞰图显示"""
+        try:
+            if self.bird_view_image is not None:
+                # 将OpenCV图像转换为Qt图像
+                height, width = self.bird_view_image.shape[:2]
+                
+                # 检查图像类型和通道
+                if len(self.bird_view_image.shape) == 3:                   
+                    # 彩色图像 - BGR格式
+                    bytes_per_line = 3 * width   
+                    try:
+                        # 将BGR转换为RGB格式
+                        rgb_image = cv2.cvtColor(self.bird_view_image, cv2.COLOR_BGR2RGB)
+                        
+                        # 创建QImage
+                        q_image = QImage(rgb_image.data, width, height, bytes_per_line, QImage.Format_RGB888)
+                    except Exception as e:
+                        print(f"彩色图像转换失败: {str(e)}")
+                        # 如果转换失败，尝试直接使用原始数据
+                        q_image = QImage(self.bird_view_image.data, width, height, bytes_per_line, QImage.Format_RGB888)
+                else:
+                    # 灰度图像处理
+                    try:
+                        # 将灰度图像转换为彩色以便更好的可视化
+                        colorized = cv2.cvtColor(self.bird_view_image, cv2.COLOR_GRAY2RGB)
+                        bytes_per_line = 3 * width
+                        
+                        # 创建QImage
+                        q_image = QImage(colorized.data, width, height, bytes_per_line, QImage.Format_RGB888)
+                    except Exception as e:
+                        print(f"灰度图像转换失败: {str(e)}")
+                        # 如果转换失败，创建一个空的图像
+                        q_image = QImage(width, height, QImage.Format_RGB888)
+                        q_image.fill(Qt.black)
+                
+                # 创建QPixmap并设置到标签
+                try:
+                    pixmap = QPixmap.fromImage(q_image)
+                    
+                    # 设置图像到标签，保持宽高比
+                    self.bird_view_label.setPixmap(pixmap.scaled(
+                        640, 
+                        240,
+                        Qt.KeepAspectRatio, 
+                        Qt.SmoothTransformation
+                    ))
+                except Exception as e:
+                    print(f"设置鸟瞰图像到UI失败: {str(e)}")
+                    self.bird_view_label.setText("鸟瞰图显示错误")
+            else:
+                # 无图像时显示默认文本
+                if hasattr(self, 'bird_view_label') and self.bird_view_label:
+                    topic_active = self.topic_subscriber and self.topic_subscriber.is_topic_active("bird_view")
+                    print(f"鸟瞰图为空，话题状态: {'活跃' if topic_active else '未连接'}")
+                    if not topic_active:
+                        self.bird_view_label.setText("等待鸟瞰图话题连接...")
+                    else:
+                        self.bird_view_label.setText("等待鸟瞰图数据...")
+        except Exception as e:
+            import traceback
+            print(f"鸟瞰图显示更新错误: {str(e)}")
+            print(traceback.format_exc())
+            self.bird_view_label.setText(f"鸟瞰图显示错误: {str(e)}")
 
 ## Start the Application
 ## ^^^^^^^^^^^^^^^^^^^^^
