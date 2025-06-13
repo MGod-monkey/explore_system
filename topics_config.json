@@ -1,0 +1,26 @@
+{
+    "battery": {
+        "topic": "/mavros/battery",
+        "msg_type": "sensor_msgs/BatteryState",
+        "description": "电池状态信息",
+        "fields": ["voltage", "current", "percentage", "temperature"]
+    },
+    "status": {
+        "topic": "/mavros/state",
+        "msg_type": "mavros_msgs/State",
+        "description": "无人机状态信息",
+        "fields": ["connected", "armed", "guided", "mode"]
+    },
+    "odometry": {
+        "topic": "/gt_iris_base_link_imu",
+        "msg_type": "nav_msgs/Odometry",
+        "description": "无人机位置信息",
+        "fields": ["pose", "twist"]
+    },
+    "velocity": {
+        "topic": "/mavros/local_position/velocity_local",
+        "msg_type": "geometry_msgs/TwistStamped",
+        "description": "无人机速度信息",
+        "fields": ["linear", "angular"]
+    }
+} 
