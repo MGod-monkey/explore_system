@@ -14,7 +14,7 @@ import math
 import numpy as np
 import cv2
 
-## 导入我们创建的话题订阅模块和仪表盘组件
+## 导入我们创建的话题订阅模块、仪表盘组件和话题日志组件
 try:
     from topics_subscriber import TopicsSubscriber
 except ImportError:
@@ -26,6 +26,12 @@ try:
 except ImportError:
     print("无法导入dashboard模块")
     DashBoard = None
+    
+try:
+    from topic_logger import TopicLogger
+except ImportError:
+    print("无法导入topic_logger模块")
+    TopicLogger = None
 
 ## Next import all the Qt bindings into the current namespace, for
 ## convenience.  This uses the "python_qt_binding" package which hides
@@ -158,6 +164,9 @@ class MyViz( QWidget ):
 
         ## 设置窗口标题
         self.setWindowTitle("无人机自主搜救系统")
+        
+        # 初始化日志窗口
+        self.log_window = None
 
         ## 禁用菜单栏、状态栏和"隐藏停靠"按钮
         self.frame.setMenuBar(None)
@@ -227,6 +236,40 @@ class MyViz( QWidget ):
         
         toolbar_layout.addLayout(function_layout)
         toolbar_layout.addStretch(1)  # 添加弹性空间
+        
+        # 添加日志按钮
+        self.log_button = QPushButton("日志显示")
+        self.log_button.setIcon(QIcon(":/images/icons/log.svg"))
+        self.log_button.setIconSize(QSize(24, 24))
+        self.log_button.setStyleSheet("""
+            QPushButton {
+                background-color: #2C3E50;
+                color: #FFFFFF;
+                border: none;
+                border-radius: 4px;
+                padding: 6px 12px;
+                font-weight: bold;
+                min-width: 120px;
+                min-height: 36px;
+                text-align: center;
+            }
+            QPushButton:hover {
+                background-color: #3498DB;
+            }
+            QPushButton:pressed {
+                background-color: #2980B9;
+            }
+            QPushButton:checked {
+                background-color: #2980B9;
+                border: 1px solid #1ABC9C;
+            }
+        """)
+        self.log_button.setCheckable(True)  # 可以切换选中状态
+        self.log_button.clicked.connect(self.toggleLogWindow)
+        function_layout.addWidget(self.log_button)
+        
+        # 添加间隔
+        function_layout.addSpacing(15)
         
         # 右侧状态显示
         status_layout = QHBoxLayout()
@@ -718,18 +761,18 @@ class MyViz( QWidget ):
         self.right_sidebar.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)  # 设置固定宽度策略
         right_sidebar_layout = QVBoxLayout(self.right_sidebar)
         right_sidebar_layout.setContentsMargins(5, 5, 5, 5)  # 设置较小的边距
-        right_sidebar_layout.setSpacing(0)  # 减小组件间距
-
-        # 添加弹性空间，将图像显示区域推到底部
-        right_sidebar_layout.addStretch(1)
+        right_sidebar_layout.setSpacing(10)  # 设置组件间距
 
         # 创建图像显示区域
         self.image_label = QLabel()
         self.image_label.setAlignment(Qt.AlignCenter)
-        self.image_label.setFixedSize(640, 480)  # 固定尺寸为640x480
+        self.image_label.setFixedSize(640, 480)  # 恢复原始尺寸为640x480
         self.image_label.setStyleSheet("background-color: #1A202C; border: 1px solid #3498DB;")
         self.image_label.setText("等待图像...")
         right_sidebar_layout.addWidget(self.image_label, 0, Qt.AlignCenter)
+        
+        # 添加弹性空间
+        right_sidebar_layout.addStretch(1)
 
         # 添加右侧栏到主分割器
         self.main_splitter.addWidget(self.right_sidebar)
@@ -1243,6 +1286,34 @@ class MyViz( QWidget ):
         except Exception as e:
             print(f"切换RViz显示面板时出错: {str(e)}")
 
+    def toggleLogWindow(self):
+        """显示或隐藏日志窗口"""
+        try:
+            # 如果按钮被选中，但窗口不存在或已关闭
+            if self.log_button.isChecked():
+                # 如果窗口不存在，创建一个
+                if not self.log_window or not hasattr(self.log_window, 'isVisible') or not self.log_window.isVisible():
+                    if TopicLogger:
+                        try:
+                            from topic_logger import TopicLoggerDialog
+                            self.log_window = TopicLoggerDialog(self)
+                            # 窗口关闭时自动取消按钮选中状态
+                            self.log_window.finished.connect(lambda: self.log_button.setChecked(False))
+                            self.log_window.show()
+                        except Exception as e:
+                            print(f"创建日志窗口时出错: {str(e)}")
+                            self.log_button.setChecked(False)
+                    else:
+                        print("话题日志组件不可用")
+                        self.log_button.setChecked(False)
+            else:
+                # 如果按钮未选中，关闭窗口
+                if self.log_window and hasattr(self.log_window, 'isVisible') and self.log_window.isVisible():
+                    self.log_window.close()
+        except Exception as e:
+            print(f"切换日志窗口时出错: {str(e)}")
+            self.log_button.setChecked(False)
+
 ## Start the Application
 ## ^^^^^^^^^^^^^^^^^^^^^
 ##
@@ -1279,6 +1350,14 @@ if __name__ == '__main__':
         if hasattr(myviz, 'topic_subscriber') and myviz.topic_subscriber:
             myviz.topic_subscriber.shutdown()
             print("已关闭话题订阅器")
+        
+        # 关闭所有话题日志窗口
+        try:
+            from topic_logger import TopicLoggerDialog
+            TopicLoggerDialog.close_all_windows()
+            print("已关闭所有话题日志窗口")
+        except Exception as e:
+            print(f"关闭话题日志窗口时出错: {str(e)}")
             
         sys.exit(exit_code)
     except KeyboardInterrupt:
@@ -1286,4 +1365,13 @@ if __name__ == '__main__':
         if hasattr(myviz, 'topic_subscriber') and myviz.topic_subscriber:
             myviz.topic_subscriber.shutdown()
             print("已关闭话题订阅器")
+            
+        # 关闭所有话题日志窗口
+        try:
+            from topic_logger import TopicLoggerDialog
+            TopicLoggerDialog.close_all_windows()
+            print("已关闭所有话题日志窗口")
+        except Exception as e:
+            print(f"关闭话题日志窗口时出错: {str(e)}")
+            
         sys.exit(0)

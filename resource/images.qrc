@@ -17,5 +17,6 @@
         <file>images/icons/battery_75.svg</file>
         <file>images/icons/start.svg</file>
         <file>images/icons/voltage.svg</file>
+        <file>images/icons/log.svg</file>
     </qresource>
 </RCC>
