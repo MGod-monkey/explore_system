@@ -4,7 +4,7 @@
 import json
 import os
 import rospy
-from sensor_msgs.msg import BatteryState
+from sensor_msgs.msg import BatteryState, Image
 from mavros_msgs.msg import State
 from nav_msgs.msg import Odometry
 from geometry_msgs.msg import TwistStamped
@@ -12,6 +12,8 @@ from std_msgs.msg import Float32
 import threading
 import time
 import math
+import cv2
+from cv_bridge import CvBridge, CvBridgeError
 
 class TopicsSubscriber:
     def __init__(self, config_file="topics_config.json"):
@@ -54,6 +56,12 @@ class TopicsSubscriber:
                     "z": 0.0
                 },
                 "speed": 0.0  # 合成的线速度
+            },
+            "camera": {
+                "image": None,  # 存储OpenCV格式的图像
+                "width": 0,
+                "height": 0,
+                "encoding": ""
             }
         }
         
@@ -68,8 +76,12 @@ class TopicsSubscriber:
             "battery": False,
             "status": False,
             "odometry": False,
-            "velocity": False
+            "velocity": False,
+            "camera": False
         }
+        
+        # 初始化cv_bridge
+        self.bridge = CvBridge()
         
         # 加载配置文件
         self.load_config(config_file)
@@ -163,6 +175,20 @@ class TopicsSubscriber:
                     rospy.loginfo(f"成功订阅速度话题: {self.config['velocity']['topic']}")
                 except Exception as e:
                     rospy.logerr(f"订阅速度话题失败: {str(e)}")
+                    
+        # 检查并订阅图像话题
+        if "camera" in self.config and self.config["camera"]["topic"] in published_topics:
+            if "camera" not in self.subscribers or not self.subscribers["camera"]:
+                try:
+                    self.subscribers["camera"] = rospy.Subscriber(
+                        self.config["camera"]["topic"],
+                        Image,
+                        self.camera_callback
+                    )
+                    self.topics_active["camera"] = True
+                    rospy.loginfo(f"成功订阅图像话题: {self.config['camera']['topic']}")
+                except Exception as e:
+                    rospy.logerr(f"订阅图像话题失败: {str(e)}")
     
     def battery_callback(self, msg):
         """电池状态话题回调函数"""
@@ -280,6 +306,30 @@ class TopicsSubscriber:
                         rospy.logerr(f"执行速度回调函数时出错: {str(e)}")
         except Exception as e:
             rospy.logerr(f"处理速度数据时出错: {str(e)}")
+    
+    def camera_callback(self, msg):
+        """摄像头图像话题回调函数"""
+        try:
+            # 将ROS图像消息转换为OpenCV格式
+            cv_image = self.bridge.imgmsg_to_cv2(msg, "bgr8")
+            
+            # 更新图像数据
+            self.data["camera"]["image"] = cv_image
+            self.data["camera"]["width"] = msg.width
+            self.data["camera"]["height"] = msg.height
+            self.data["camera"]["encoding"] = msg.encoding
+            
+            # 触发注册的回调函数
+            if "camera" in self.callbacks:
+                for callback in self.callbacks["camera"]:
+                    try:
+                        callback(self.data["camera"])
+                    except Exception as e:
+                        rospy.logerr(f"执行图像回调函数时出错: {str(e)}")
+        except CvBridgeError as e:
+            rospy.logerr(f"转换图像数据时出错: {str(e)}")
+        except Exception as e:
+            rospy.logerr(f"处理图像数据时出错: {str(e)}")
     
     def register_callback(self, topic_name, callback):
         """注册回调函数，当话题数据更新时触发"""

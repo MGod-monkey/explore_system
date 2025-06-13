@@ -22,5 +22,11 @@
         "msg_type": "geometry_msgs/TwistStamped",
         "description": "无人机速度信息",
         "fields": ["linear", "angular"]
+    },
+    "camera": {
+        "topic": "/camera/color/image_raw",
+        "msg_type": "sensor_msgs/Image",
+        "description": "无人机摄像头图像",
+        "fields": ["data", "encoding", "width", "height"]
     }
 } 

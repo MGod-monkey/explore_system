@@ -11,6 +11,8 @@ import os
 import json
 import random
 import math
+import numpy as np
+import cv2
 
 ## 导入我们创建的话题订阅模块和仪表盘组件
 try:
@@ -66,13 +68,8 @@ class MyViz( QWidget ):
         font = QFont("WenQuanYi Micro Hei", 10)
         QApplication.setFont(font)
         
-        # 电池状态变量
-        self.battery_percentage = 100.0
-        self.battery_voltage = 12.0  # 默认电压值
-        
-        # 设置中文字体支持
-        font = QFont("WenQuanYi Micro Hei", 10)
-        QApplication.setFont(font)
+        # 图像显示相关变量
+        self.camera_image = None
         
         # 设置窗口样式，使用黑蓝色调
         self.setStyleSheet("""
@@ -225,7 +222,7 @@ class MyViz( QWidget ):
         self.settings_button.setIconSize(QSize(24, 24))
         self.settings_button.setMinimumWidth(120)
         self.settings_button.setMaximumHeight(36)
-        self.settings_button.clicked.connect(self.toggleDisplayPanel)
+        self.settings_button.clicked.connect(self.toggleRVizDisplayPanel)
         function_layout.addWidget(self.settings_button)
         
         toolbar_layout.addLayout(function_layout)
@@ -603,7 +600,7 @@ class MyViz( QWidget ):
         
         # 创建侧边栏控制按钮容器
         sidebar_control_container = QWidget()
-        sidebar_control_container.setFixedWidth(10)
+        sidebar_control_container.setFixedWidth(20)  # 增加宽度到20px
         sidebar_control_container.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
         sidebar_control_container.setStyleSheet("""
             QWidget {
@@ -619,24 +616,24 @@ class MyViz( QWidget ):
         sidebar_control_layout.setSpacing(0)
         
         # 创建切换按钮
-        self.toggle_sidebar_btn = QPushButton("<")
-        self.toggle_sidebar_btn.setFixedWidth(10)
+        self.toggle_sidebar_btn = QPushButton("l")  # 左侧栏最初是显示的，所以按钮指向左侧
+        self.toggle_sidebar_btn.setFixedWidth(20)  # 增加宽度到20px
         self.toggle_sidebar_btn.setStyleSheet("""
             QPushButton {
-                background-color: #1A202C;
-                color: #3498DB;
+                background-color: #2c3e50;  /* 深蓝灰色背景 */
+                color: white;
                 font-weight: bold;
                 border: none;
                 border-radius: 0;
                 padding: 0;
-                font-size: 10pt;
+                font-size: 16pt;  /* 增大字体 */
             }
             QPushButton:hover {
-                background-color: #3498DB;
+                background-color: #2a3642;  /* 更深的蓝灰色悬停效果 */
                 color: white;
             }
             QPushButton:pressed {
-                background-color: #2980B9;
+                background-color: #1d262e;  /* 按下效果 */
                 color: white;
             }
         """)
@@ -652,60 +649,108 @@ class MyViz( QWidget ):
         # 添加控制容器到主分割器
         self.main_splitter.addWidget(sidebar_control_container)
         
-        # 创建右侧分割器，用于RViz显示区域和Display面板
+        # 创建右侧分割器，只用于RViz显示区域
         self.right_splitter = QSplitter(Qt.Horizontal)
         
         # 添加RViz框架
         self.right_splitter.addWidget(self.frame)
         
-        # 创建Display面板
-        self.display_panel = QWidget()
-        self.display_panel.setMinimumWidth(300)
-        self.display_panel.setMaximumWidth(400)
-        display_layout = QVBoxLayout(self.display_panel)
-        
-        # 获取RViz的Display面板
-        # 由于getDisplaysPanel方法不存在，我们需要创建自己的显示面板
-        display_group = QGroupBox("显示设置")
-        display_group.setStyleSheet("color: #3498DB;")
-        display_group_layout = QVBoxLayout(display_group)
-        
-        # 创建一个树形控件来模拟Display面板
-        display_tree = QTreeWidget()
-        display_tree.setHeaderLabel("显示选项")
-        display_tree.setStyleSheet("""
-            background-color: #1E2330; 
-            color: white;
-        """)
-        display_tree.header().setDefaultAlignment(Qt.AlignCenter)  # 设置标题居中
-        
-        # 添加一些基本选项
-        root_item = QTreeWidgetItem(display_tree, ["全局选项"])
-        root_item.setTextAlignment(0, Qt.AlignCenter)  # 设置项目文本居中
-        
-        display_tree.expandAll()
-        display_group_layout.addWidget(display_tree)
-        
-        # 添加一个刷新按钮
-        refresh_button = QPushButton("刷新")
-        display_group_layout.addWidget(refresh_button)
-        
-        display_layout.addWidget(display_group)
-        
-        # 默认隐藏Display面板
-        self.display_panel.setVisible(False)
-        self.right_splitter.addWidget(self.display_panel)
+        # 设置按钮点击处理函数更新
+        self.settings_button.clicked.connect(self.toggleRVizDisplayPanel)
         
         # 添加右侧分割器到主分割器
         self.main_splitter.addWidget(self.right_splitter)
         
+        # 创建右侧栏控制按钮容器
+        right_sidebar_control_container = QWidget()
+        right_sidebar_control_container.setFixedWidth(20)  # 增加宽度到20px
+        right_sidebar_control_container.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)
+        right_sidebar_control_container.setStyleSheet("""
+            QWidget {
+                background-color: #1A202C;
+                border-left: none;
+                border-right: 1px solid #3498DB;
+            }
+        """)
+        
+        # 创建垂直布局
+        right_sidebar_control_layout = QVBoxLayout(right_sidebar_control_container)
+        right_sidebar_control_layout.setContentsMargins(0, 0, 0, 0)
+        right_sidebar_control_layout.setSpacing(0)
+        
+        # 创建切换按钮，与左侧栏按钮保持一致的样式
+        self.toggle_right_sidebar_btn = QPushButton(">")  # 右侧栏最初是显示的，所以按钮指向右侧
+        self.toggle_right_sidebar_btn.setFixedWidth(20)  # 增加宽度到20px
+        self.toggle_right_sidebar_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #2c3e50;  /* 深蓝灰色背景 */
+                color: white;
+                font-weight: bold;
+                border: none;
+                border-radius: 0;
+                padding: 0;
+                font-size: 16pt;  /* 增大字体 */
+            }
+            QPushButton:hover {
+                background-color: #2a3642;  /* 更深的蓝灰色悬停效果 */
+                color: white;
+            }
+            QPushButton:pressed {
+                background-color: #1d262e;  /* 按下效果 */
+                color: white;
+            }
+        """)
+        self.toggle_right_sidebar_btn.setCursor(Qt.PointingHandCursor)
+        
+        # 当按钮被点击时触发右侧栏的显示/隐藏
+        self.right_sidebar_expanded = True
+        self.toggle_right_sidebar_btn.clicked.connect(self.toggleRightSidebar)
+        
+        # 将按钮添加到布局
+        right_sidebar_control_layout.addWidget(self.toggle_right_sidebar_btn, 0, Qt.AlignCenter)
+        
+        # 添加右侧控制按钮容器到主分割器
+        self.main_splitter.addWidget(right_sidebar_control_container)
+        
+        # 创建右侧栏
+        self.right_sidebar = QWidget()
+        self.right_sidebar.setFixedWidth(650)  # 设置固定宽度650px
+        self.right_sidebar.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)  # 设置固定宽度策略
+        right_sidebar_layout = QVBoxLayout(self.right_sidebar)
+        right_sidebar_layout.setContentsMargins(5, 5, 5, 5)  # 设置较小的边距
+        right_sidebar_layout.setSpacing(0)  # 减小组件间距
+
+        # 添加弹性空间，将图像显示区域推到底部
+        right_sidebar_layout.addStretch(1)
+
+        # 创建图像显示区域
+        self.image_label = QLabel()
+        self.image_label.setAlignment(Qt.AlignCenter)
+        self.image_label.setFixedSize(640, 480)  # 固定尺寸为640x480
+        self.image_label.setStyleSheet("background-color: #1A202C; border: 1px solid #3498DB;")
+        self.image_label.setText("等待图像...")
+        right_sidebar_layout.addWidget(self.image_label, 0, Qt.AlignCenter)
+
+        # 添加右侧栏到主分割器
+        self.main_splitter.addWidget(self.right_sidebar)
+        
+        # 设置分割器手柄宽度
+        self.main_splitter.setHandleWidth(3)  # 设置较小的分割器手柄宽度
+        self.right_splitter.setHandleWidth(3)  # 设置较小的分割器手柄宽度
+        self.main_splitter.setChildrenCollapsible(False)  # 防止子部件被完全折叠
+        self.right_splitter.setChildrenCollapsible(False)  # 防止子部件被完全折叠
+
+        # 禁止分割器伸缩右侧栏
+        self.main_splitter.setStretchFactor(0, 0)  # 左侧栏不自动拉伸
+        self.main_splitter.setStretchFactor(1, 0)  # 左侧控制按钮不自动拉伸
+        self.main_splitter.setStretchFactor(2, 1)  # 中间RViz区域自动拉伸
+        self.main_splitter.setStretchFactor(3, 0)  # 右侧控制按钮不自动拉伸
+        self.main_splitter.setStretchFactor(4, 0)  # 右侧栏不自动拉伸
+        
         # 设置初始分割比例
         total_width = self.width()  # 获取窗口总宽度
-        self.main_splitter.setSizes([500, 10, total_width - 510])  # 左侧栏500px，控制按钮10px，剩余给右侧显示区域
-        
-        # 设置分割器可以调整大小
-        self.main_splitter.setHandleWidth(20)  # 增加调整手柄宽度，使其更容易拖动
-        self.main_splitter.setChildrenCollapsible(False)  # 防止子部件被完全折叠
+        remaining_width = total_width - 500 - 20 - 20 - 650  # 总宽度减去左侧栏、左侧控制按钮、右侧控制按钮和右侧栏的宽度
+        self.main_splitter.setSizes([500, 20, remaining_width, 20, 650])  # 左侧栏500px，左控制按钮20px，中间RViz区域自适应，右控制按钮20px，右侧栏650px
         
         main_layout.addWidget(self.main_splitter)
         
@@ -757,10 +802,16 @@ class MyViz( QWidget ):
             self.topic_subscriber.register_callback("odometry", self.updatePositionDisplay)
             self.topic_subscriber.register_callback("velocity", self.updateVelocityDisplay)
             self.topic_subscriber.register_callback("status", self.updateStatusDisplay)
+            self.topic_subscriber.register_callback("camera", self.updateCameraImage)
             print("话题订阅器已启动，将在后台自动连接可用话题...")
         except Exception as e:
             print(f"初始化话题订阅器失败: {str(e)}")
             self.topic_subscriber = None
+        
+        # 设置图像更新定时器
+        self.image_timer = QTimer(self)
+        self.image_timer.timeout.connect(self.updateImageDisplay)
+        self.image_timer.start(33)  # 约30fps
         
         main_layout.addWidget(status_bar)
         
@@ -772,34 +823,30 @@ class MyViz( QWidget ):
         self.setLayout(main_layout)
     
     def toggleDisplayPanel(self):
-        """显示或隐藏Display面板"""
-        self.display_panel.setVisible(not self.display_panel.isVisible())
-        if self.display_panel.isVisible():
-            self.settings_button.setText("隐藏设置")
-        else:
-            self.settings_button.setText("设置")
-            
+        """此方法已不再使用，保留以避免可能的引用错误"""
+        self.toggleRVizDisplayPanel()
+    
     def toggleSidebar(self):
         """显示或隐藏侧边栏"""
         if self.sidebar_expanded:
             # 隐藏侧边栏
             self.left_sidebar.setMaximumWidth(0)
             self.left_sidebar.setMinimumWidth(0)
-            self.toggle_sidebar_btn.setText(">")
+            self.toggle_sidebar_btn.setText("l")  # 使用基本ASCII字符
             self.sidebar_expanded = False
             
             # 更新分割器尺寸
             sizes = self.main_splitter.sizes()
-            self.main_splitter.setSizes([0, 10, sizes[0] + sizes[2]])
+            self.main_splitter.setSizes([0, 20, sizes[0] + sizes[2]])
         else:
             # 恢复侧边栏
             self.left_sidebar.setFixedWidth(500)  # 固定宽度500px
-            self.toggle_sidebar_btn.setText("<")
+            self.toggle_sidebar_btn.setText("l")  # 使用基本ASCII字符
             self.sidebar_expanded = True
             
             # 更新分割器尺寸
             sizes = self.main_splitter.sizes()
-            self.main_splitter.setSizes([500, 10, sizes[2] - 500])
+            self.main_splitter.setSizes([500, 20, sizes[2] - 500])
 
     def onTopButtonClick(self):
         self.switchToView("Top View")
@@ -934,6 +981,53 @@ class MyViz( QWidget ):
         except Exception as e:
             print(f"更新状态显示时出错: {str(e)}")
     
+    def updateCameraImage(self, camera_data):
+        """处理摄像头图像更新"""
+        try:
+            if not camera_data or camera_data["image"] is None:
+                return
+                
+            # 保存最新图像
+            self.camera_image = camera_data["image"]
+            
+        except Exception as e:
+            print(f"处理图像更新时出错: {str(e)}")
+
+    def updateImageDisplay(self):
+        """更新图像显示"""
+        try:
+            if self.camera_image is not None:
+                # 将OpenCV图像转换为Qt图像
+                height, width, channel = self.camera_image.shape
+                bytes_per_line = 3 * width
+                
+                # 将BGR转换为RGB格式
+                rgb_image = cv2.cvtColor(self.camera_image, cv2.COLOR_BGR2RGB)
+                
+                # 创建QImage
+                q_image = QImage(rgb_image.data, width, height, bytes_per_line, QImage.Format_RGB888)
+                
+                # 创建QPixmap并设置到标签
+                pixmap = QPixmap.fromImage(q_image)
+                
+                # 设置图像到标签，保持宽高比
+                self.image_label.setPixmap(pixmap.scaled(
+                    640, 
+                    480,
+                    Qt.KeepAspectRatio, 
+                    Qt.SmoothTransformation
+                ))
+            else:
+                # 无图像时显示默认文本
+                if hasattr(self, 'image_label') and self.image_label:
+                    if not self.topic_subscriber or not self.topic_subscriber.is_topic_active("camera"):
+                        self.image_label.setText("等待图像话题连接...")
+                    else:
+                        self.image_label.setText("等待图像数据...")
+        except Exception as e:
+            print(f"更新图像显示时出错: {str(e)}")
+            self.image_label.setText(f"图像显示错误: {str(e)}")
+    
     def updateStatusBar(self):
         # 更新帧率
         current_time = time.time()
@@ -959,7 +1053,8 @@ class MyViz( QWidget ):
                 self.topic_subscriber.is_topic_active("battery") or 
                 self.topic_subscriber.is_topic_active("odometry") or
                 self.topic_subscriber.is_topic_active("velocity") or
-                self.topic_subscriber.is_topic_active("status")
+                self.topic_subscriber.is_topic_active("status") or
+                self.topic_subscriber.is_topic_active("camera")
             )
         ):
             # 模拟电池电量波动（仅用于测试）
@@ -1041,9 +1136,112 @@ class MyViz( QWidget ):
             if hasattr(self, 'mode_label') and random.random() < 0.001:
                 modes = ["MANUAL", "AUTO", "GUIDED", "STABILIZE", "LOITER"]
                 self.mode_label.setText(random.choice(modes))
+            
+            # 模拟图像生成 - 仅在没有真实图像数据时
+            if not self.topic_subscriber or not self.topic_subscriber.is_topic_active("camera"):
+                if not hasattr(self, 'sim_image_count'):
+                    self.sim_image_count = 0
+                    
+                # 创建模拟图像
+                width, height = 640, 480
+                sim_image = np.zeros((height, width, 3), dtype=np.uint8)
+                
+                # 添加背景色 - 深蓝色
+                sim_image[:, :] = [25, 35, 45]  # BGR格式
+                
+                # 添加渐变效果
+                for y in range(height):
+                    factor = y / height
+                    sim_image[y, :] = [
+                        min(255, int(25 + 30 * factor)),
+                        min(255, int(35 + 40 * factor)),
+                        min(255, int(45 + 50 * factor))
+                    ]
+                
+                # 添加文本 - 显示模拟模式
+                font = cv2.FONT_HERSHEY_SIMPLEX
+                cv2.putText(
+                    sim_image,
+                    "模拟图像模式",
+                    (width//2 - 100, height//2 - 30),
+                    font, 1,
+                    (255, 255, 255),
+                    2,
+                    cv2.LINE_AA
+                )
+                
+                # 添加时间戳
+                cv2.putText(
+                    sim_image,
+                    f"时间: {time.time():.2f}",
+                    (width//2 - 80, height//2 + 10),
+                    font, 0.7,
+                    (200, 200, 200),
+                    1,
+                    cv2.LINE_AA
+                )
+                
+                # 添加动态效果 - 移动的点
+                self.sim_image_count += 1
+                angle = self.sim_image_count * 0.1
+                radius = 100
+                center_x = width//2 + int(radius * math.cos(angle))
+                center_y = height//2 + int(radius * math.sin(angle))
+                cv2.circle(sim_image, (center_x, center_y), 10, (0, 165, 255), -1)
+                
+                # 添加扫描线效果
+                scan_line = int((height - 1) * (0.5 + 0.5 * math.sin(time.time() * 2)))
+                sim_image[scan_line, :] = [100, 200, 255]
+                
+                # 设置模拟图像
+                self.camera_image = sim_image
         
         # 每次渲染帧时增加计数器
         self.frame_count += 1
+
+    def toggleRightSidebar(self):
+        """显示或隐藏右侧栏"""
+        if self.right_sidebar_expanded:
+            # 隐藏右侧栏
+            self.right_sidebar.setMaximumWidth(0)
+            self.right_sidebar.setMinimumWidth(0)
+            self.toggle_right_sidebar_btn.setText("<")  # 使用基本ASCII字符
+            self.right_sidebar_expanded = False
+            
+            # 更新分割器尺寸，将右侧栏的空间分配给中间的RViz区域
+            sizes = self.main_splitter.sizes()
+            new_sizes = [sizes[0], sizes[1], sizes[2] + sizes[4], sizes[3], 0]
+            self.main_splitter.setSizes(new_sizes)
+        else:
+            # 恢复右侧栏
+            self.right_sidebar.setFixedWidth(650)  # 固定宽度650px
+            self.toggle_right_sidebar_btn.setText(">")  # 使用基本ASCII字符
+            self.right_sidebar_expanded = True
+            
+            # 更新分割器尺寸，从中间区域分配空间给右侧栏
+            sizes = self.main_splitter.sizes()
+            if sizes[2] > 650:  # 确保中间区域有足够空间
+                new_sizes = [sizes[0], sizes[1], sizes[2] - 650, sizes[3], 650]
+            else:  # 如果中间区域空间不足，则按比例分配
+                total_space = sizes[2]
+                new_middle = max(int(total_space * 0.4), 100)  # 至少保留100px给中间区域
+                new_sizes = [sizes[0], sizes[1], new_middle, sizes[3], total_space - new_middle]
+            self.main_splitter.setSizes(new_sizes)
+
+    def toggleRVizDisplayPanel(self):
+        """显示或隐藏RViz的原生显示面板"""
+        try:
+            # 使用RViz的setDisplayConfigVisible方法切换显示面板可见性
+            display_visible = self.manager.getDisplayConfigVisibility()
+            self.manager.setDisplayConfigVisibility(not display_visible)
+            
+            # 更新按钮文本
+            if not display_visible:
+                self.settings_button.setText("隐藏设置")
+            else:
+                self.settings_button.setText("设置")
+        except Exception as e:
+            print(f"切换RViz显示面板时出错: {str(e)}")
 
 ## Start the Application
 ## ^^^^^^^^^^^^^^^^^^^^^
