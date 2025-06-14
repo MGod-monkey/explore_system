@@ -13,6 +13,7 @@ import random
 import math
 import numpy as np
 import cv2
+import subprocess  # 添加subprocess模块用于执行命令
 
 ## 导入我们创建的话题订阅模块、仪表盘组件和话题日志组件
 try:
@@ -44,6 +45,9 @@ try:
     from python_qt_binding.QtWidgets import *
 except ImportError:
     pass
+
+# 确保QTimer可用
+from python_qt_binding.QtCore import QTimer
 
 ## 导入生成的资源文件（图标和图片资源）
 try:
@@ -81,6 +85,18 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         
         # 存储已检测到的标记点ID，避免重复添加
         self.detected_markers = set()
+        
+        # 话题数据标志，标记话题是否有实际数据
+        self.topics_with_data = {
+            "battery": False,
+            "status": False,
+            "odometry": False,
+            "velocity": False,
+            "camera": False,
+            "depth": False,
+            "bird_view": False,
+            "marker": False
+        }
         
         # 设置窗口标题
         self.setWindowTitle("无人机自主搜救系统")
@@ -556,6 +572,9 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         start_text_label.setAlignment(Qt.AlignCenter)
         start_layout.addWidget(start_text_label, 0, Qt.AlignCenter)
         
+        # 连接一键启动按钮的点击事件
+        start_btn.clicked.connect(self.startDroneSystem)
+        
         function_layout.addWidget(start_btn, 1, 1)
         
         # 创建右侧按钮 - 待开发 - 文字竖向排列
@@ -563,7 +582,7 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         future_btn_right.setCursor(Qt.PointingHandCursor)  # 设置鼠标悬停时的光标为手型
         future_btn_right.setStyleSheet("""
             QPushButton {
-                background-color: #7F8C8D;
+                background-color: #E74C3C;  /* 红色背景 */
                 color: white;
                 border-radius: 8px;
                 font-size: 12pt;
@@ -574,10 +593,10 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
                 border: none;
             }
             QPushButton:hover {
-                background-color: #95A5A6;
+                background-color: #C0392B;  /* 深红色悬停效果 */
             }
             QPushButton:pressed {
-                background-color: #707B7C;
+                background-color: #A93226;  /* 更深红色按下效果 */
             }
         """)
         # 添加阴影效果
@@ -587,13 +606,16 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         shadow4.setOffset(2, 2)
         future_btn_right.setGraphicsEffect(shadow4)
         # 创建竖向文字标签
-        future_label = QLabel("待\n开\n发")
+        future_label = QLabel("停\n止\n程\n序")
         future_label.setAlignment(Qt.AlignCenter)
         future_label.setStyleSheet("color: white; background-color: transparent; font-size: 12pt; font-weight: bold;")
         # 添加标签到按钮
         future_layout = QVBoxLayout(future_btn_right)
         future_layout.setContentsMargins(5, 5, 5, 5)
         future_layout.addWidget(future_label, 0, Qt.AlignCenter)
+        
+        # 连接停止按钮的点击事件
+        future_btn_right.clicked.connect(self.stopDroneSystem)
         
         function_layout.addWidget(future_btn_right, 1, 2)
         
@@ -1110,32 +1132,17 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         self.speed = 0
         self.linear_speed = 0
         self.angular_speed = 0
-        self.gear = 4  # 默认挡位
+        self.gear = 11  # 默认挡位为11，表示N挡（空挡）
         
-        # 初始化话题订阅器(将在后台自动连接话题)
-        try:
-            self.topic_subscriber = TopicsSubscriber()
-            # 注册电池状态更新回调
-            self.topic_subscriber.register_callback("battery", self.updateBatteryStatus)
-            self.topic_subscriber.register_callback("odometry", self.updatePositionDisplay)
-            self.topic_subscriber.register_callback("velocity", self.updateVelocityDisplay)
-            self.topic_subscriber.register_callback("status", self.updateStatusDisplay)
-            self.topic_subscriber.register_callback("camera", self.updateCameraImage)
-            self.topic_subscriber.register_callback("depth", self.updateDepthImage)
-            self.topic_subscriber.register_callback("bird_view", self.updateBirdViewImage)
-            self.topic_subscriber.register_callback("marker", self.marker_callback)
-            print("话题订阅器已启动，将在后台自动连接可用话题...")
-            
-            # 初始状态设置为未连接
-            if hasattr(self, 'connection_label'):
-                self.connection_label.setText("未连接")
-                self.connection_label.setStyleSheet("color: #E74C3C;")
-            if hasattr(self, 'mode_label'):
-                self.mode_label.setText("未连接")
-                
-        except Exception as e:
-            print(f"初始化话题订阅器失败: {str(e)}")
-            self.topic_subscriber = None
+        # 初始化话题订阅器变量，但不启动订阅（将在点击一键启动后再订阅）
+        self.topic_subscriber = None
+        
+        # 初始状态设置为未连接
+        if hasattr(self, 'connection_label'):
+            self.connection_label.setText("未连接")
+            self.connection_label.setStyleSheet("color: #E74C3C;")
+        if hasattr(self, 'mode_label'):
+            self.mode_label.setText("未连接")
         
         # 设置图像更新定时器
         self.image_timer = QTimer(self)
@@ -1224,6 +1231,10 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
                 
             # 更新电池图标
             self.battery_icon_label.setPixmap(QPixmap(icon_path).scaled(24, 24, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            
+            # 标记电池话题有数据
+            self.topics_with_data["battery"] = True
+            
         except Exception as e:
             print(f"更新电池状态显示时出错: {str(e)}")
     
@@ -1244,6 +1255,10 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
             # 更新高度显示
             if hasattr(self, 'altitude_label'):
                 self.altitude_label.setText(f"{pos_z:.4f} m")
+            
+            # 标记位置话题有数据
+            self.topics_with_data["odometry"] = True
+            
         except Exception as e:
             print(f"更新位置显示时出错: {str(e)}")
     
@@ -1392,13 +1407,16 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
             else:
                 # 无图像时显示默认文本，使用加大字号的样式使提示更明显
                 if hasattr(self, 'image_label') and self.image_label:
-                    if self.current_image_mode == "rgb":
-                        if not self.topic_subscriber or not self.topic_subscriber.is_topic_active("camera"):
+                    if not self.topic_subscriber:
+                        # 未启动系统时显示提示信息
+                        self.image_label.setText("<div style='font-size: 16pt; color: #3498DB; text-align: center; margin-top: 200px;'>请点击\"一键启动\"按钮启动系统</div>")
+                    elif self.current_image_mode == "rgb":
+                        if not self.topic_subscriber.is_topic_active("camera"):
                             self.image_label.setText("<div style='font-size: 16pt; color: #3498DB; text-align: center; margin-top: 200px;'>等待RGB图像话题连接...</div>")
                         else:
                             self.image_label.setText("<div style='font-size: 16pt; color: #3498DB; text-align: center; margin-top: 200px;'>等待RGB图像数据...</div>")
                     else:  # depth模式
-                        if not self.topic_subscriber or not self.topic_subscriber.is_topic_active("depth"):
+                        if not self.topic_subscriber.is_topic_active("depth"):
                             self.image_label.setText("<div style='font-size: 16pt; color: #3498DB; text-align: center; margin-top: 200px;'>等待深度图像话题连接...</div>")
                         else:
                             self.image_label.setText("<div style='font-size: 16pt; color: #3498DB; text-align: center; margin-top: 200px;'>等待深度图像数据...</div>")
@@ -1425,15 +1443,41 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
                 # 如果ROS节点未初始化，显示系统时间
                 self.ros_time_label.setText(f"Time: {time.time():.4f}")
         
-        # 如果没有话题订阅器或者话题还未连接，使用模拟数据更新
-        if not self.topic_subscriber or (
-            self.topic_subscriber and not (
-                self.topic_subscriber.is_topic_active("battery") or 
-                self.topic_subscriber.is_topic_active("odometry") or
-                self.topic_subscriber.is_topic_active("velocity") or
-                self.topic_subscriber.is_topic_active("status") or
-                self.topic_subscriber.is_topic_active("camera")
-            )
+        # 显示话题连接状态
+        self.updateTopicStatus()
+        
+        # 如果没有话题订阅器，显示待启动状态
+        if not self.topic_subscriber:
+            # 显示静态状态信息而不使用模拟数据
+            if hasattr(self, 'battery_icon_label'):
+                self.battery_icon_label.setPixmap(QPixmap(":/images/icons/battery_100.svg").scaled(24, 24, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            
+            if hasattr(self, 'voltage_label'):
+                self.voltage_label.setText("-- V")
+            
+            if hasattr(self, 'position_label'):
+                self.position_label.setText("Position: (请启动系统)")
+            
+            if hasattr(self, 'altitude_label'):
+                self.altitude_label.setText("-- m")
+                
+            if hasattr(self, 'ground_speed_label'):
+                self.ground_speed_label.setText("-- m/s")
+                
+            if hasattr(self, 'dashboard') and self.dashboard:
+                self.dashboard.set_speed(0)
+                self.dashboard.set_gear(11)  # N挡
+                
+            # 当没有话题订阅器时，不使用模拟数据
+            return
+        
+        # 如果话题订阅器存在但话题还未连接，使用模拟数据更新
+        if not (
+            self.topic_subscriber.is_topic_active("battery") or 
+            self.topic_subscriber.is_topic_active("odometry") or
+            self.topic_subscriber.is_topic_active("velocity") or
+            self.topic_subscriber.is_topic_active("status") or
+            self.topic_subscriber.is_topic_active("camera")
         ):
             # 模拟电池电量波动（仅用于测试）
             battery_percentage = self.battery_percentage + (random.uniform(-0.5, 0.3) if hasattr(random, 'uniform') else 0)
@@ -1516,27 +1560,111 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
             # 话题未连接时，不生成模拟图像，只更新UI显示消息
             
             # 更新RGB图像显示文本 - 使用自定义HTML样式显示
-            if (not self.topic_subscriber or not self.topic_subscriber.is_topic_active("camera")) and hasattr(self, 'image_label'):
-                if self.current_image_mode == "rgb":  # 只在RGB模式下更新
-                    self.image_label.setText("<div style='font-size: 16pt; color: #3498DB; text-align: center; margin-top: 200px;'>等待RGB图像话题连接...</div>")
-                # 确保未使用模拟图像
-                self.camera_image = None
+            if hasattr(self, 'image_label'):
+                if not self.topic_subscriber.is_topic_active("camera"):
+                    if self.current_image_mode == "rgb":  # 只在RGB模式下更新
+                        self.image_label.setText("<div style='font-size: 16pt; color: #3498DB; text-align: center; margin-top: 200px;'>等待RGB图像话题连接...</div>")
+                    # 确保未使用模拟图像
+                    self.camera_image = None
                 
             # 更新深度图像显示文本 - 使用自定义HTML样式显示
-            if (not self.topic_subscriber or not self.topic_subscriber.is_topic_active("depth")) and hasattr(self, 'image_label'):
-                if self.current_image_mode == "depth":  # 只在深度模式下更新
-                    self.image_label.setText("<div style='font-size: 16pt; color: #3498DB; text-align: center; margin-top: 200px;'>等待深度图像话题连接...</div>")
-                # 确保未使用模拟图像
-                self.depth_image = None
+            if hasattr(self, 'image_label'):
+                if not self.topic_subscriber.is_topic_active("depth"):
+                    if self.current_image_mode == "depth":  # 只在深度模式下更新
+                        self.image_label.setText("<div style='font-size: 16pt; color: #3498DB; text-align: center; margin-top: 200px;'>等待深度图像话题连接...</div>")
+                    # 确保未使用模拟图像
+                    self.depth_image = None
                 
             # 更新鸟瞰图显示文本 - 使用自定义HTML样式显示
-            if (not self.topic_subscriber or not self.topic_subscriber.is_topic_active("bird_view")) and hasattr(self, 'bird_view_label'):
-                self.bird_view_label.setText("<div style='font-size: 14pt; color: #3498DB; text-align: center; margin-top: 100px;'>等待鸟瞰图话题连接...</div>")
-                # 确保未使用模拟图像
-                self.bird_view_image = None
+            if hasattr(self, 'bird_view_label'):
+                if not self.topic_subscriber.is_topic_active("bird_view"):
+                    self.bird_view_label.setText("<div style='font-size: 14pt; color: #3498DB; text-align: center; margin-top: 100px;'>等待鸟瞰图话题连接...</div>")
+                    # 确保未使用模拟图像
+                    self.bird_view_image = None
         
         # 每次渲染帧时增加计数器
         self.frame_count += 1
+
+    def updateTopicStatus(self):
+        """更新并显示话题状态"""
+        if not hasattr(self, 'topic_subscriber') or not self.topic_subscriber:
+            # 如果话题订阅器未初始化，显示等待启动信息
+            if hasattr(self, 'position_label'):
+                tooltip = "话题订阅尚未启动\n请点击'一键启动'按钮启动系统并订阅话题"
+                self.position_label.setToolTip(tooltip)
+                
+                # 添加或更新状态指示器
+                if not hasattr(self, 'topic_status_indicator'):
+                    # 创建状态指示器
+                    self.topic_status_indicator = QLabel("ℹ️")
+                    self.topic_status_indicator.setStyleSheet("color: #3498DB; font-weight: bold; padding-left: 5px;")
+                    self.topic_status_indicator.setToolTip(tooltip)
+                    
+                    # 将指示器添加到位置标签后面
+                    if self.position_label.parent():
+                        layout = self.position_label.parent().layout()
+                        if layout:
+                            layout.addWidget(self.topic_status_indicator)
+                else:
+                    self.topic_status_indicator.setText("ℹ️")
+                    self.topic_status_indicator.setStyleSheet("color: #3498DB; font-weight: bold; padding-left: 5px;")
+                    self.topic_status_indicator.setToolTip(tooltip)
+                    self.topic_status_indicator.show()
+            return
+            
+        # 构建状态信息
+        inactive_topics = []
+        no_data_topics = []
+        
+        # 检查每个话题的状态
+        for topic_name, is_active in self.topic_subscriber.topics_active.items():
+            if not is_active:
+                inactive_topics.append(topic_name)
+            elif is_active and not self.topics_with_data.get(topic_name, False):
+                no_data_topics.append(topic_name)
+        
+        # 如果有inactive或no_data话题，更新状态信息
+        if inactive_topics or no_data_topics:
+            status_text = ""
+            
+            if inactive_topics:
+                status_text += f"未连接话题: {', '.join(inactive_topics)}"
+            
+            if no_data_topics:
+                if status_text:
+                    status_text += " | "
+                status_text += f"无数据话题: {', '.join(no_data_topics)}"
+            
+            # 更新状态栏
+            if hasattr(self, 'position_label'):
+                tooltip = "部分话题未连接或没有数据\n\n"
+                if inactive_topics:
+                    tooltip += f"未连接话题:\n{', '.join(inactive_topics)}\n\n"
+                if no_data_topics:
+                    tooltip += f"已连接但无数据话题:\n{', '.join(no_data_topics)}"
+                
+                self.position_label.setToolTip(tooltip)
+                
+                # 在状态栏显示红点指示器
+                if not hasattr(self, 'topic_status_indicator'):
+                    # 创建状态指示器
+                    self.topic_status_indicator = QLabel("⚠️")
+                    self.topic_status_indicator.setStyleSheet("color: #E74C3C; font-weight: bold; padding-left: 5px;")
+                    self.topic_status_indicator.setToolTip(tooltip)
+                    
+                    # 将指示器添加到位置标签后面
+                    if self.position_label.parent():
+                        layout = self.position_label.parent().layout()
+                        if layout:
+                            layout.addWidget(self.topic_status_indicator)
+                else:
+                    self.topic_status_indicator.setText("⚠️")
+                    self.topic_status_indicator.setStyleSheet("color: #E74C3C; font-weight: bold; padding-left: 5px;")
+                    self.topic_status_indicator.setToolTip(tooltip)
+                    self.topic_status_indicator.show()
+        elif hasattr(self, 'topic_status_indicator'):
+            # 如果所有话题都正常，隐藏指示器
+            self.topic_status_indicator.hide()
 
     def toggleRightSidebar(self):
         """显示或隐藏右侧栏"""
@@ -1610,6 +1738,258 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
             print(f"切换日志窗口时出错: {str(e)}")
             self.log_button.setChecked(False)
 
+    def startDroneSystem(self):
+        """启动无人机系统"""
+        try:
+            # 显示正在启动的消息
+            progress_dialog = QProgressDialog("正在启动无人机系统，请稍候...", "取消", 0, 100, self)
+            progress_dialog.setWindowTitle("系统启动")
+            progress_dialog.setWindowModality(Qt.WindowModal)
+            progress_dialog.setCancelButton(None)  # 禁用取消按钮
+            progress_dialog.setValue(0)
+            progress_dialog.show()
+            QApplication.processEvents()
+            
+            # 定义工作空间路径
+            fast_drone_ws = os.path.expanduser("~/GUET_UAV_Drone_v2")
+            zyc_fuel_ws = os.path.expanduser("~/zyc_fuel_ws")
+            
+            # 后台启动第一个程序 - 使用同步执行方式
+            progress_dialog.setLabelText("正在启动主系统...")
+            progress_dialog.setValue(10)
+            QApplication.processEvents()
+            
+            cmd1 = f"cd {fast_drone_ws} && source {fast_drone_ws}/devel/setup.bash && sh shfiles/run.sh"
+            process = subprocess.Popen(cmd1, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, 
+                                      executable='/bin/bash', text=True)
+            
+            # 等待5秒，检查初期启动情况
+            timeout = 5  # 5秒超时检查
+            start_time = time.time()
+            
+            # 非阻塞方式检查进程是否已结束
+            while time.time() - start_time < timeout:
+                returncode = process.poll()
+                if returncode is not None:  # 进程已结束
+                    if returncode != 0:
+                        # 获取错误输出
+                        _, stderr = process.communicate()
+                        error_msg = f"启动无人机系统失败，返回代码: {returncode}\n\n错误信息:\n{stderr[:500]}..."
+                        QMessageBox.critical(self, "启动错误", error_msg)
+                        progress_dialog.close()
+                        return
+                    break
+                    
+                # 更新进度条
+                progress = int(10 + min(40, (time.time() - start_time) / timeout * 40))
+                progress_dialog.setValue(progress)
+                QApplication.processEvents()
+                time.sleep(0.1)
+            
+            # 设置一个定时器检查进程是否在后续运行中出错
+            self.check_process_timer = QTimer()
+            self.check_process_timer.timeout.connect(lambda: self.checkProcessStatus(process, "主系统"))
+            self.check_process_timer.start(2000)  # 每2秒检查一次
+            
+            # 继续执行，第一个脚本已经正常启动
+            progress_dialog.setValue(50)
+            progress_dialog.setLabelText("启动位姿转换模块...")
+            QApplication.processEvents()
+            
+            # 延迟启动第二个进程
+            QTimer.singleShot(5000, lambda: self.startSecondProcess(progress_dialog))
+            
+        except Exception as e:
+            QMessageBox.critical(self, "启动错误", f"启动无人机系统时出错: {str(e)}")
+            
+    def checkProcessStatus(self, process, process_name):
+        """检查进程状态，如果异常终止则显示错误"""
+        try:
+            returncode = process.poll()
+            if returncode is not None:  # 进程已结束
+                self.check_process_timer.stop()
+                
+                if returncode != 0:
+                    # 获取错误输出
+                    _, stderr = process.communicate()
+                    error_msg = f"{process_name}异常终止，返回代码: {returncode}\n\n错误信息:\n{stderr[:500]}..."
+                    QMessageBox.critical(self, "运行错误", error_msg)
+                    return False
+            return True
+        except Exception as e:
+            print(f"检查进程状态时出错: {str(e)}")
+            return False
+            
+    def startSecondProcess(self, progress_dialog):
+        """启动第二个进程"""
+        try:
+            # 定义工作空间路径
+            zyc_fuel_ws = os.path.expanduser("~/zyc_fuel_ws")
+            
+            # 后台启动第二个程序
+            cmd2 = f"cd {zyc_fuel_ws} && source {zyc_fuel_ws}/devel/setup.bash && rosrun vins_to_mavros vins_to_mavros_node"
+            process2 = subprocess.Popen(cmd2, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, 
+                                      executable='/bin/bash', text=True)
+            
+            # 等待2秒，检查初期启动情况
+            timeout = 2  # 2秒超时检查
+            start_time = time.time()
+            
+            # 非阻塞方式检查进程是否已结束
+            while time.time() - start_time < timeout:
+                returncode = process2.poll()
+                if returncode is not None:  # 进程已结束
+                    if returncode != 0:
+                        # 获取错误输出
+                        _, stderr = process2.communicate()
+                        error_msg = f"启动位姿转换模块失败，返回代码: {returncode}\n\n错误信息:\n{stderr[:500]}..."
+                        QMessageBox.critical(self, "启动错误", error_msg)
+                        progress_dialog.close()
+                        return
+                    break
+                    
+                # 更新进度条
+                progress = int(50 + min(25, (time.time() - start_time) / timeout * 25))
+                progress_dialog.setValue(progress)
+                QApplication.processEvents()
+                time.sleep(0.1)
+            
+            # 设置一个定时器检查进程是否在后续运行中出错
+            self.check_process2_timer = QTimer()
+            self.check_process2_timer.timeout.connect(lambda: self.checkProcessStatus(process2, "位姿转换模块"))
+            self.check_process2_timer.start(2000)  # 每2秒检查一次
+            
+            # 更新进度
+            progress_dialog.setValue(75)
+            progress_dialog.setLabelText("启动坐标转换模块...")
+            QApplication.processEvents()
+            
+            # 延迟启动第三个进程
+            QTimer.singleShot(3000, lambda: self.startThirdProcess(progress_dialog))
+            
+        except Exception as e:
+            progress_dialog.close()
+            QMessageBox.critical(self, "启动错误", f"启动第二个进程时出错: {str(e)}")
+    
+    def startThirdProcess(self, progress_dialog):
+        """启动第三个进程"""
+        try:
+            # 定义工作空间路径
+            zyc_fuel_ws = os.path.expanduser("~/zyc_fuel_ws")
+            
+            # 后台启动第三个程序
+            cmd3 = f"cd {zyc_fuel_ws} && source {zyc_fuel_ws}/devel/setup.bash && rosrun pose_to_odom_converter pose_to_odom_converter_node"
+            process3 = subprocess.Popen(cmd3, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, 
+                                      executable='/bin/bash', text=True)
+            
+            # 等待2秒，检查初期启动情况
+            timeout = 2  # 2秒超时检查
+            start_time = time.time()
+            
+            # 非阻塞方式检查进程是否已结束
+            while time.time() - start_time < timeout:
+                returncode = process3.poll()
+                if returncode is not None:  # 进程已结束
+                    if returncode != 0:
+                        # 获取错误输出
+                        _, stderr = process3.communicate()
+                        error_msg = f"启动坐标转换模块失败，返回代码: {returncode}\n\n错误信息:\n{stderr[:500]}..."
+                        QMessageBox.critical(self, "启动错误", error_msg)
+                        progress_dialog.close()
+                        return
+                    break
+                    
+                # 更新进度条
+                progress = int(75 + min(20, (time.time() - start_time) / timeout * 20))
+                progress_dialog.setValue(progress)
+                QApplication.processEvents()
+                time.sleep(0.1)
+            
+            # 设置一个定时器检查进程是否在后续运行中出错
+            self.check_process3_timer = QTimer()
+            self.check_process3_timer.timeout.connect(lambda: self.checkProcessStatus(process3, "坐标转换模块"))
+            self.check_process3_timer.start(2000)  # 每2秒检查一次
+            
+            # 完成启动
+            progress_dialog.setValue(100)
+            QApplication.processEvents()
+            progress_dialog.close()
+            
+            # 启动话题订阅器（在系统启动完成后）
+            QTimer.singleShot(2000, self.setupTopicSubscriber)  # 延迟2秒初始化订阅器
+            
+            # 通知用户系统已成功启动
+            QMessageBox.information(self, "启动完成", "无人机系统已成功启动！")
+            
+            # 自动打开日志窗口
+            QTimer.singleShot(3000, self.showOdomLog)
+            
+        except Exception as e:
+            progress_dialog.close()
+            QMessageBox.critical(self, "启动错误", f"启动第三个进程时出错: {str(e)}")
+    
+    def setupTopicSubscriber(self):
+        """初始化话题订阅器和相关回调函数"""
+        try:
+            # 如果已经有订阅器存在，先关闭它
+            if self.topic_subscriber:
+                self.topic_subscriber.shutdown()
+                self.topic_subscriber = None
+                
+            # 创建新的订阅器
+            self.topic_subscriber = TopicsSubscriber()
+            
+            # 注册回调函数
+            self.topic_subscriber.register_callback("battery", self.updateBatteryStatus)
+            self.topic_subscriber.register_callback("odometry", self.updatePositionDisplay)
+            self.topic_subscriber.register_callback("velocity", self.updateVelocityDisplay)
+            self.topic_subscriber.register_callback("status", self.updateStatusDisplay)
+            self.topic_subscriber.register_callback("camera", self.updateCameraImage)
+            self.topic_subscriber.register_callback("depth", self.updateDepthImage)
+            self.topic_subscriber.register_callback("bird_view", self.updateBirdViewImage)
+            self.topic_subscriber.register_callback("marker", self.marker_callback)
+            
+            print("话题订阅器已启动，将在后台自动连接可用话题...")
+            return True
+        except Exception as e:
+            print(f"初始化话题订阅器失败: {str(e)}")
+            self.topic_subscriber = None
+            return False
+
+    def showOdomLog(self):
+        """显示odom话题的日志"""
+        try:
+            # 先确保日志窗口打开
+            if not self.log_button.isChecked():
+                self.log_button.click()
+                
+            # 等待日志窗口显示
+            QTimer.singleShot(500, lambda: self.selectOdomTopic())
+            
+        except Exception as e:
+            print(f"显示odom话题日志时出错: {str(e)}")
+    
+    def selectOdomTopic(self):
+        """选择odom话题"""
+        try:
+            if self.log_window and hasattr(self.log_window, 'logger_widget'):
+                # 查找/converted_odom话题
+                odom_topic = "/converted_odom"
+                combo = self.log_window.logger_widget.topic_combo
+                
+                # 寻找话题
+                index = combo.findText(odom_topic)
+                if index >= 0:
+                    combo.setCurrentIndex(index)
+                    # 点击打印按钮开始记录
+                    self.log_window.logger_widget.log_btn.click()
+                else:
+                    print(f"找不到话题 {odom_topic}，等待话题可用")
+                    # 再次尝试
+                    QTimer.singleShot(2000, self.selectOdomTopic)
+        except Exception as e:
+            print(f"选择odom话题时出错: {str(e)}")
+
     def switchToRGBImage(self):
         """切换到RGB图像模式"""
         self.rgb_button.setChecked(True)
@@ -1669,6 +2049,11 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         """更新鸟瞰图显示"""
         try:
             if self.bird_view_image is not None:
+                # 检查图像是否为空
+                if self.bird_view_image.size == 0 or self.bird_view_image is None:
+                    self.bird_view_label.setText("<div style='font-size: 14pt; color: #3498DB; text-align: center; margin-top: 100px;'>收到空图像数据</div>")
+                    return
+                    
                 # 将OpenCV图像转换为Qt图像
                 height, width = self.bird_view_image.shape[:2]
                 
@@ -1684,8 +2069,9 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
                         q_image = QImage(rgb_image.data, width, height, bytes_per_line, QImage.Format_RGB888)
                     except Exception as e:
                         print(f"彩色图像转换失败: {str(e)}")
-                        # 如果转换失败，尝试直接使用原始数据
-                        q_image = QImage(self.bird_view_image.data, width, height, bytes_per_line, QImage.Format_RGB888)
+                        # 如果转换失败，显示错误信息而不是尝试使用原始数据
+                        self.bird_view_label.setText(f"<div style='font-size: 12pt; color: #E74C3C; text-align: center; margin-top: 100px;'>图像处理错误:<br>{str(e)}</div>")
+                        return
                 else:
                     # 灰度图像处理
                     try:
@@ -1697,14 +2083,19 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
                         q_image = QImage(colorized.data, width, height, bytes_per_line, QImage.Format_RGB888)
                     except Exception as e:
                         print(f"灰度图像转换失败: {str(e)}")
-                        # 如果转换失败，创建一个空的图像
-                        q_image = QImage(width, height, QImage.Format_RGB888)
-                        q_image.fill(Qt.black)
+                        # 如果转换失败，显示错误信息
+                        self.bird_view_label.setText(f"<div style='font-size: 12pt; color: #E74C3C; text-align: center; margin-top: 100px;'>灰度图像处理错误:<br>{str(e)}</div>")
+                        return
                 
                 # 创建QPixmap并设置到标签
                 try:
                     pixmap = QPixmap.fromImage(q_image)
                     
+                    # 检查pixmap是否为空
+                    if pixmap.isNull():
+                        self.bird_view_label.setText("<div style='font-size: 12pt; color: #E74C3C; text-align: center; margin-top: 100px;'>无法创建有效图像</div>")
+                        return
+                        
                     # 设置图像到标签，保持宽高比
                     self.bird_view_label.setPixmap(pixmap.scaled(
                         640, 
@@ -1714,21 +2105,27 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
                     ))
                 except Exception as e:
                     print(f"设置鸟瞰图像到UI失败: {str(e)}")
-                    self.bird_view_label.setText("鸟瞰图显示错误")
+                    self.bird_view_label.setText(f"<div style='font-size: 12pt; color: #E74C3C; text-align: center; margin-top: 100px;'>图像显示错误:<br>{str(e)}</div>")
             else:
                 # 无图像时显示默认文本
                 if hasattr(self, 'bird_view_label') and self.bird_view_label:
-                    topic_active = self.topic_subscriber and self.topic_subscriber.is_topic_active("bird_view")
-                    # 移除调试打印，减少控制台输出
-                    if not topic_active:
-                        self.bird_view_label.setText("<div style='font-size: 14pt; color: #3498DB; text-align: center; margin-top: 100px;'>等待鸟瞰图话题连接...</div>")
+                    if not self.topic_subscriber:
+                        # 未启动系统时显示提示信息
+                        self.bird_view_label.setText("<div style='font-size: 14pt; color: #3498DB; text-align: center; margin-top: 100px;'>请点击\"一键启动\"按钮启动系统</div>")
                     else:
-                        self.bird_view_label.setText("<div style='font-size: 14pt; color: #3498DB; text-align: center; margin-top: 100px;'>等待鸟瞰图数据...</div>")
+                        topic_active = self.topic_subscriber.is_topic_active("bird_view")
+                        # 移除调试打印，减少控制台输出
+                        if not topic_active:
+                            self.bird_view_label.setText("<div style='font-size: 14pt; color: #3498DB; text-align: center; margin-top: 100px;'>等待鸟瞰图话题连接...</div>")
+                        else:
+                            self.bird_view_label.setText("<div style='font-size: 14pt; color: #3498DB; text-align: center; margin-top: 100px;'>等待鸟瞰图数据...</div>")
         except Exception as e:
-            import traceback
+            # 捕获所有异常并显示友好的错误信息
+            try:
+                self.bird_view_label.setText(f"<div style='font-size: 12pt; color: #E74C3C; text-align: center; margin-top: 100px;'>鸟瞰图显示错误:<br>{str(e)}</div>")
+            except:
+                pass  # 如果连错误信息都无法显示，就不做任何操作
             print(f"鸟瞰图显示更新错误: {str(e)}")
-            print(traceback.format_exc())
-            self.bird_view_label.setText(f"鸟瞰图显示错误: {str(e)}")
     
     # 添加人员位置管理功能
     def addPerson(self):
@@ -2082,6 +2479,54 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         except Exception as e:
             print(f"添加标记点到表格时出错: {str(e)}")
 
+    def stopDroneSystem(self):
+        """停止无人机系统"""
+        try:
+            # 确认弹窗
+            reply = QMessageBox.question(self, "确认停止", "确定要停止所有无人机系统进程吗？",
+                                      QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+            
+            if reply == QMessageBox.No:
+                return
+                
+            # 显示正在停止的消息
+            msg = QMessageBox(QMessageBox.Information, "正在停止", "正在停止所有无人机系统进程...", QMessageBox.NoButton, self)
+            msg.show()
+            QApplication.processEvents()  # 确保消息框显示出来
+            
+            # 使用已存在的停止脚本
+            script_path = "/home/laohanba/zyc_fuel_ws/scripts/stop.sh"
+            
+            # 执行脚本
+            try:
+                process = subprocess.Popen(['bash', script_path], 
+                                          stdout=subprocess.PIPE, 
+                                          stderr=subprocess.PIPE,
+                                          universal_newlines=True)
+                stdout, stderr = process.communicate()
+                
+                # 关闭之前显示的消息框
+                msg.close()
+                
+                # 检查执行结果
+                if process.returncode == 0:
+                    result_msg = f"成功停止无人机系统！\n\n详细信息:\n{stdout}"
+                    QMessageBox.information(self, "停止成功", result_msg)
+                else:
+                    error_msg = f"停止无人机系统时出错，但可能已部分停止。\n\n错误信息:\n{stderr}\n\n输出信息:\n{stdout}"
+                    QMessageBox.warning(self, "停止异常", error_msg)
+                    
+            except Exception as e:
+                # 关闭之前显示的消息框
+                msg.close()
+                
+                error_msg = f"执行停止脚本时出错: {str(e)}"
+                QMessageBox.critical(self, "停止失败", error_msg)
+                
+        except Exception as e:
+            error_msg = f"停止无人机系统时出错: {str(e)}"
+            QMessageBox.critical(self, "停止失败", error_msg)
+
 ## Start the Application
 ## ^^^^^^^^^^^^^^^^^^^^^
 ##
@@ -2104,6 +2549,9 @@ if __name__ == '__main__':
     # 创建主窗口
     myviz = MyViz()
     
+    # 不要使用自定义布局，避免"already has a layout"错误
+    # myviz.setLayout(main_layout) # 删除这一行
+
             # 获取可用屏幕区域（考虑任务栏/面板）
     desktop = QDesktopWidget()
     available_geometry = desktop.availableGeometry(desktop.primaryScreen())
@@ -2113,9 +2561,6 @@ if __name__ == '__main__':
     
     # 直接以最大化模式启动窗口
     myviz.showMaximized()
-    
-    # 不再需要单独调用show()，showMaximized()已经包含了show()功能
-    # myviz.show()
     
     # 启动Qt事件循环
     try:

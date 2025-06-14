@@ -429,6 +429,10 @@ class TopicsSubscriber:
             # 将ROS图像消息转换为OpenCV图像
             cv_image = self.bridge.imgmsg_to_cv2(msg)
             
+            # 检查图像是否有效
+            if cv_image is None or cv_image.size == 0:
+                return
+            
             # 如果self.data中还没有bird_view字段，先创建它
             if "bird_view" not in self.data:
                 self.data["bird_view"] = {
@@ -451,6 +455,8 @@ class TopicsSubscriber:
                     
         except CvBridgeError as e:
             print(f"转换鸟瞰图失败: {str(e)}")
+        except Exception as e:
+            print(f"处理鸟瞰图话题时出错: {str(e)}")
     
     def marker_callback(self, msg):
         """标记点话题回调函数"""
