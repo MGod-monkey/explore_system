@@ -79,6 +79,9 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         self.depth_image = None
         self.bird_view_image = None
         
+        # 存储已检测到的标记点ID，避免重复添加
+        self.detected_markers = set()
+        
         # 设置窗口标题
         self.setWindowTitle("无人机自主搜救系统")
         
@@ -213,31 +216,31 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         function_layout = QHBoxLayout()
         function_layout.setSpacing(15)  # 增加按钮间距
         
-        # 启动程序按钮
-        start_button = QPushButton("启动程序")
-        start_button.setIcon(QIcon(":/images/icons/start.svg"))
-        start_button.setIconSize(QSize(24, 24))
-        start_button.setStyleSheet("background-color: #27AE60; text-align: center; padding-left: 5px;")
-        start_button.setMinimumWidth(120)
-        start_button.setMaximumHeight(36)
-        function_layout.addWidget(start_button)
+        # # 启动程序按钮
+        # start_button = QPushButton("启动程序")
+        # start_button.setIcon(QIcon(":/images/icons/start.svg"))
+        # start_button.setIconSize(QSize(24, 24))
+        # start_button.setStyleSheet("background-color: #27AE60; text-align: center; padding-left: 5px;")
+        # start_button.setMinimumWidth(120)
+        # start_button.setMaximumHeight(36)
+        # function_layout.addWidget(start_button)
         
-        # 操控无人机按钮
-        control_button = QPushButton("操控无人机")
-        control_button.setIcon(QIcon(":/images/icons/joystick.png"))
-        control_button.setIconSize(QSize(24, 24))
-        control_button.setMinimumWidth(120)
-        control_button.setMaximumHeight(36)
-        function_layout.addWidget(control_button)
+        # # 操控无人机按钮
+        # control_button = QPushButton("操控无人机")
+        # control_button.setIcon(QIcon(":/images/icons/joystick.png"))
+        # control_button.setIconSize(QSize(24, 24))
+        # control_button.setMinimumWidth(120)
+        # control_button.setMaximumHeight(36)
+        # function_layout.addWidget(control_button)
         
-        # 设置按钮，用于显示/隐藏Display面板
-        self.settings_button = QPushButton("设置")
-        self.settings_button.setIcon(QIcon(":/images/setting.png"))
-        self.settings_button.setIconSize(QSize(24, 24))
-        self.settings_button.setMinimumWidth(120)
-        self.settings_button.setMaximumHeight(36)
-        self.settings_button.clicked.connect(self.toggleRVizDisplayPanel)
-        function_layout.addWidget(self.settings_button)
+        # # 设置按钮，用于显示/隐藏Display面板
+        # self.settings_button = QPushButton("设置")
+        # self.settings_button.setIcon(QIcon(":/images/setting.png"))
+        # self.settings_button.setIconSize(QSize(24, 24))
+        # self.settings_button.setMinimumWidth(120)
+        # self.settings_button.setMaximumHeight(36)
+        # self.settings_button.clicked.connect(self.toggleRVizDisplayPanel)
+        # function_layout.addWidget(self.settings_button)
         
         toolbar_layout.addLayout(function_layout)
         toolbar_layout.addStretch(1)  # 添加弹性空间
@@ -707,8 +710,8 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         # 添加RViz框架
         self.right_splitter.addWidget(self.frame)
         
-        # 设置按钮点击处理函数更新
-        self.settings_button.clicked.connect(self.toggleRVizDisplayPanel)
+        # # 设置按钮点击处理函数更新
+        # self.settings_button.clicked.connect(self.toggleRVizDisplayPanel)
         
         # 添加右侧分割器到主分割器
         self.main_splitter.addWidget(self.right_splitter)
@@ -1120,6 +1123,7 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
             self.topic_subscriber.register_callback("camera", self.updateCameraImage)
             self.topic_subscriber.register_callback("depth", self.updateDepthImage)
             self.topic_subscriber.register_callback("bird_view", self.updateBirdViewImage)
+            self.topic_subscriber.register_callback("marker", self.marker_callback)
             print("话题订阅器已启动，将在后台自动连接可用话题...")
             
             # 初始状态设置为未连接
@@ -1128,6 +1132,7 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
                 self.connection_label.setStyleSheet("color: #E74C3C;")
             if hasattr(self, 'mode_label'):
                 self.mode_label.setText("未连接")
+                
         except Exception as e:
             print(f"初始化话题订阅器失败: {str(e)}")
             self.topic_subscriber = None
@@ -2027,6 +2032,55 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
             
         except Exception as e:
             print(f"处理图像更新时出错: {str(e)}")
+
+    def marker_callback(self, marker_data):
+        """处理visualization_marker话题的回调函数"""
+        try:
+            # 提取标记ID并检查是否已添加过
+            marker_id = marker_data["id"]
+            if marker_id % 2 == 0:  # 球体标记的ID是偶数
+                ball_id = marker_id // 2  # 获取实际的球体ID
+                
+                # 检查是否已添加过该标记
+                if ball_id not in self.detected_markers:
+                    # 获取小球坐标
+                    x = marker_data["pose"]["position"]["x"]
+                    y = marker_data["pose"]["position"]["y"]
+                    z = marker_data["pose"]["position"]["z"]
+                    
+                    # 添加到表格中
+                    self._add_marker_to_table(ball_id, x, y, z)
+                    
+                    # 标记为已添加
+                    self.detected_markers.add(ball_id)
+                    
+                    print(f"检测到新的标记点: ID={ball_id}, 位置: x={x:.2f}, y={y:.2f}, z={z:.2f}")
+        except Exception as e:
+            print(f"处理标记点数据时出错: {str(e)}")
+
+    def _add_marker_to_table(self, ball_id, x, y, z):
+        """将检测到的标记点添加到人员位置表格"""
+        try:
+            # 获取表格当前行数
+            row_position = self.position_table.rowCount()
+            self.position_table.insertRow(row_position)
+            
+            # 设置单元格值
+            self.position_table.setItem(row_position, 0, QTableWidgetItem(str(ball_id)))
+            self.position_table.setItem(row_position, 1, QTableWidgetItem(f"{x:.2f}"))
+            self.position_table.setItem(row_position, 2, QTableWidgetItem(f"{y:.2f}"))
+            
+            # 设置状态为"待确认"
+            status_item = QTableWidgetItem("待确认")
+            status_item.setForeground(QBrush(QColor("#F39C12")))  # 橙色
+            self.position_table.setItem(row_position, 3, status_item)
+            
+            print(f"已添加标记点到表格: ID={ball_id}, X={x:.2f}, Y={y:.2f}, Z={z:.2f}")
+            
+            # 自动滚动到新添加的行
+            self.position_table.scrollToItem(self.position_table.item(row_position, 0))
+        except Exception as e:
+            print(f"添加标记点到表格时出错: {str(e)}")
 
 ## Start the Application
 ## ^^^^^^^^^^^^^^^^^^^^^

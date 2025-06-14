@@ -40,5 +40,11 @@
         "msg_type": "sensor_msgs/Image",
         "description": "障碍物鸟瞰图",
         "fields": ["data", "encoding", "width", "height"]
+    },
+    "marker": {
+        "topic": "/visualization_marker",
+        "msg_type": "visualization_msgs/Marker",
+        "description": "搜救人员标记点",
+        "fields": ["id", "type", "pose", "scale", "color", "action"]
     }
 } 
