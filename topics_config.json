@@ -12,7 +12,7 @@
         "fields": ["connected", "armed", "guided", "mode"]
     },
     "odometry": {
-        "topic": "/gt_iris_base_link_imu",
+        "topic": "/converted_odom",
         "msg_type": "nav_msgs/Odometry",
         "description": "无人机位置信息",
         "fields": ["pose", "twist"]
@@ -30,7 +30,7 @@
         "fields": ["data", "encoding", "width", "height"]
     },
     "depth": {
-        "topic": "/camera/depth_aligned_to_color_and_infra1/image_raw",
+        "topic": "/camera/depth/image_rect_raw",
         "msg_type": "sensor_msgs/Image",
         "description": "无人机深度摄像头图像",
         "fields": ["data", "encoding", "width", "height"]

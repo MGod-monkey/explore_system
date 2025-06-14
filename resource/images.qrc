@@ -18,5 +18,8 @@
         <file>images/icons/start.svg</file>
         <file>images/icons/voltage.svg</file>
         <file>images/icons/log.svg</file>
+        <file>images/icons/dropdown.svg</file>
+        <file>images/icons/dropleft.svg</file>
+        <file>images/icons/dropright.svg</file>
     </qresource>
 </RCC>

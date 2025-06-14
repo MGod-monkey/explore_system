@@ -241,11 +241,9 @@ class TopicLogger(QWidget):
                 border-bottom-right-radius: 3px;
             }
             QComboBox::down-arrow {
-                width: 0;
-                height: 0;
-                border-left: 5px solid transparent;
-                border-right: 5px solid transparent;
-                border-top: 5px solid #3498DB;
+                image: url(:/images/icons/dropdown.svg);
+                width: 12px;
+                height: 12px;
                 margin-right: 5px;
             }
             QComboBox QAbstractItemView {

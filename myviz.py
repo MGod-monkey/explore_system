@@ -86,6 +86,9 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         self.central_widget = QWidget()
         self.setCentralWidget(self.central_widget)
         
+        # 添加窗口resize事件处理
+        self.resizeEvent = self.onResize
+        
         # 设置窗口样式，使用黑蓝色调
         self.setStyleSheet("""
             QWidget {
@@ -307,9 +310,11 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         # 创建左侧边栏，用于显示速度表盘和其他信息
         self.left_sidebar = QWidget()
         self.left_sidebar.setFixedWidth(500)  # 设置固定宽度500px
+        # 使用QSizePolicy允许垂直方向缩放
+        self.left_sidebar.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
         left_sidebar_layout = QVBoxLayout(self.left_sidebar)
         left_sidebar_layout.setContentsMargins(10, 10, 10, 10)  # 增加边距
-        left_sidebar_layout.setSpacing(15)  # 增加组件间距
+        left_sidebar_layout.setSpacing(10)  # 减小组件间距
         
         # 添加无人机状态组件
         status_group = QGroupBox("无人机状态")
@@ -392,7 +397,10 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         
         # 添加功能区域组件（与状态区分离）
         function_group = QGroupBox("控制中心")
-        function_group.setStyleSheet("color: #3498DB; font-size: 14pt;")  # 设置标题样式
+        function_group.setStyleSheet("color: #3498DB; font-size: 14pt; margin-top: 15px;")  # 设置标题样式并增加顶部边距
+        function_group.setTitle("  控制中心  ")  # 通过增加空格让标题文字有更多显示空间
+        function_group.setObjectName("function_group")  # 设置对象名，方便后续查找
+        self.function_group = function_group  # 保存引用
         function_group_layout = QVBoxLayout(function_group)
         function_group_layout.setContentsMargins(0, 0, 0, 0)  # 移除所有内边距
         function_group_layout.setSpacing(0)  # 移除间距
@@ -660,26 +668,25 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         sidebar_control_layout.setContentsMargins(0, 0, 0, 0)
         sidebar_control_layout.setSpacing(0)
         
-        # 创建切换按钮
-        self.toggle_sidebar_btn = QPushButton("l")  # 左侧栏最初是显示的，所以按钮指向左侧
-        self.toggle_sidebar_btn.setFixedWidth(20)  # 增加宽度到20px
+        # 创建切换按钮，使用图标替代文字
+        self.toggle_sidebar_btn = QPushButton()
+        self.toggle_sidebar_btn.setFixedWidth(20)  # 保持宽度
+        self.toggle_sidebar_btn.setFixedHeight(50)  # 设置固定高度使图标更显眼
+        # 使用图标
+        self.toggle_sidebar_btn.setIcon(QIcon(":/images/icons/dropleft.svg"))
+        self.toggle_sidebar_btn.setIconSize(QSize(16, 16))
         self.toggle_sidebar_btn.setStyleSheet("""
             QPushButton {
-                background-color: #2c3e50;  /* 深蓝灰色背景 */
-                color: white;
-                font-weight: bold;
+                background-color: #1A202C;  /* 与周围颜色相协调 */
                 border: none;
                 border-radius: 0;
-                padding: 0;
-                font-size: 16pt;  /* 增大字体 */
+                padding: 2px;
             }
             QPushButton:hover {
-                background-color: #2a3642;  /* 更深的蓝灰色悬停效果 */
-                color: white;
+                background-color: #3498DB;  /* 蓝色悬停效果 */
             }
             QPushButton:pressed {
-                background-color: #1d262e;  /* 按下效果 */
-                color: white;
+                background-color: #2980B9;  /* 按下效果 */
             }
         """)
         self.toggle_sidebar_btn.setCursor(Qt.PointingHandCursor)
@@ -723,26 +730,25 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         right_sidebar_control_layout.setContentsMargins(0, 0, 0, 0)
         right_sidebar_control_layout.setSpacing(0)
         
-        # 创建切换按钮，与左侧栏按钮保持一致的样式
-        self.toggle_right_sidebar_btn = QPushButton(">")  # 右侧栏最初是显示的，所以按钮指向右侧
-        self.toggle_right_sidebar_btn.setFixedWidth(20)  # 增加宽度到20px
+        # 创建切换按钮，使用图标替代文字
+        self.toggle_right_sidebar_btn = QPushButton()
+        self.toggle_right_sidebar_btn.setFixedWidth(20)  # 保持宽度
+        self.toggle_right_sidebar_btn.setFixedHeight(50)  # 设置固定高度使图标更显眼
+        # 使用图标
+        self.toggle_right_sidebar_btn.setIcon(QIcon(":/images/icons/dropright.svg"))
+        self.toggle_right_sidebar_btn.setIconSize(QSize(16, 16))
         self.toggle_right_sidebar_btn.setStyleSheet("""
             QPushButton {
-                background-color: #2c3e50;  /* 深蓝灰色背景 */
-                color: white;
-                font-weight: bold;
+                background-color: #1A202C;  /* 与周围颜色相协调 */
                 border: none;
                 border-radius: 0;
-                padding: 0;
-                font-size: 16pt;  /* 增大字体 */
+                padding: 2px;
             }
             QPushButton:hover {
-                background-color: #2a3642;  /* 更深的蓝灰色悬停效果 */
-                color: white;
+                background-color: #3498DB;  /* 蓝色悬停效果 */
             }
             QPushButton:pressed {
-                background-color: #1d262e;  /* 按下效果 */
-                color: white;
+                background-color: #2980B9;  /* 按下效果 */
             }
         """)
         self.toggle_right_sidebar_btn.setCursor(Qt.PointingHandCursor)
@@ -760,6 +766,8 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         # 创建右侧栏
         self.right_sidebar = QWidget()
         self.right_sidebar.setFixedWidth(650)  # 设置固定宽度650px
+        # 使右侧栏可以在垂直方向调整大小
+        self.right_sidebar.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
         self.right_sidebar.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)  # 设置固定宽度策略
         right_sidebar_layout = QVBoxLayout(self.right_sidebar)
         right_sidebar_layout.setContentsMargins(5, 5, 5, 5)  # 设置较小的边距
@@ -770,20 +778,24 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         image_title.setStyleSheet("padding: 0px;")
         image_title.setAlignment(Qt.AlignCenter)
         
-        # 添加弹性空间在顶部
-        right_sidebar_layout.addStretch(1)
+        # 减少顶部弹性空间，让表格区域有更多空间
+        right_sidebar_layout.addSpacing(10)
         
         # 添加待搜救人员位置窗口
         person_position_group = QGroupBox("待搜救人员位置")
         person_position_group.setStyleSheet("color: #3498DB; font-size: 14pt;")  # 设置标题样式
+        # 设置大小策略为垂直方向可扩展
+        person_position_group.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
         person_position_layout = QVBoxLayout(person_position_group)
         person_position_layout.setContentsMargins(10, 20, 10, 10)  # 增加内边距
-        person_position_layout.setSpacing(15)  # 增加组件间距
+        person_position_layout.setSpacing(10)  # 减少组件间距以节省空间
         
         # 创建位置显示区域
         position_frame = QFrame()
         position_frame.setFrameShape(QFrame.StyledPanel)
         position_frame.setStyleSheet("background-color: #1A202C; border-radius: 10px; border: 1px solid #3498DB;")
+        # 设置Frame可扩展
+        position_frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         position_frame_layout = QVBoxLayout(position_frame)
         position_frame_layout.setContentsMargins(10, 10, 10, 10)
         
@@ -815,8 +827,10 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         self.position_table.horizontalHeader().setStretchLastSection(True)
         self.position_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
         self.position_table.verticalHeader().setVisible(False)
-        self.position_table.setMinimumHeight(150)
-        self.position_table.setMaximumHeight(250)
+        # 设置表格可扩展，但有最小高度限制
+        self.position_table.setMinimumHeight(120)
+        # 不设置最大高度限制，允许根据可用空间自动调整
+        self.position_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         
         # 将表格初始化为空
         self.position_table.setRowCount(0)
@@ -886,8 +900,8 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         # 添加位置框架到位置组
         person_position_layout.addWidget(position_frame)
         
-        # 添加位置组到右侧栏
-        right_sidebar_layout.addWidget(person_position_group)
+        # 添加位置组到右侧栏，并给予较大的拉伸系数
+        right_sidebar_layout.addWidget(person_position_group, 2)  # 拉伸系数为2，表示会占用较多可用空间
         
         # 在底部添加图像显示区域和控制按钮
         image_display_container = QWidget()
@@ -1011,8 +1025,8 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         self.image_label.setText("等待图像...")
         image_display_layout.addWidget(self.image_label)
         
-        # 添加图像显示容器（移除标题）
-        right_sidebar_layout.addWidget(image_display_container, 0, Qt.AlignCenter)
+        # 添加图像显示容器，使用拉伸系数1
+        right_sidebar_layout.addWidget(image_display_container, 1)
         
         # 设置当前图像类型
         self.current_image_mode = "rgb"  # 默认显示RGB图像
@@ -1031,6 +1045,15 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         self.right_splitter.setHandleWidth(3)  # 设置较小的分割器手柄宽度
         self.main_splitter.setChildrenCollapsible(False)  # 防止子部件被完全折叠
         self.right_splitter.setChildrenCollapsible(False)  # 防止子部件被完全折叠
+        
+        # 设置大分辨率下的分割器初始比例 - 以百分比形式
+        total_width = QDesktopWidget().availableGeometry().width()
+        if total_width > 1920:  # 对于大分辨率屏幕
+            # 假设总宽为100，分配左:中:右 = 20:50:30的比例
+            left_width = int(total_width * 0.2)
+            right_width = int(total_width * 0.3)
+            center_width = total_width - left_width - right_width - 40  # 40是两个控制条的宽度
+            self.main_splitter.setSizes([left_width, 20, center_width, 20, right_width])
 
         # 禁止分割器伸缩右侧栏
         self.main_splitter.setStretchFactor(0, 0)  # 左侧栏不自动拉伸
@@ -1098,6 +1121,13 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
             self.topic_subscriber.register_callback("depth", self.updateDepthImage)
             self.topic_subscriber.register_callback("bird_view", self.updateBirdViewImage)
             print("话题订阅器已启动，将在后台自动连接可用话题...")
+            
+            # 初始状态设置为未连接
+            if hasattr(self, 'connection_label'):
+                self.connection_label.setText("未连接")
+                self.connection_label.setStyleSheet("color: #E74C3C;")
+            if hasattr(self, 'mode_label'):
+                self.mode_label.setText("未连接")
         except Exception as e:
             print(f"初始化话题订阅器失败: {str(e)}")
             self.topic_subscriber = None
@@ -1126,7 +1156,7 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
             # 隐藏侧边栏
             self.left_sidebar.setMaximumWidth(0)
             self.left_sidebar.setMinimumWidth(0)
-            self.toggle_sidebar_btn.setText("l")  # 使用基本ASCII字符
+            self.toggle_sidebar_btn.setIcon(QIcon(":/images/icons/dropright.svg"))  # 切换图标为右箭头
             self.sidebar_expanded = False
             
             # 更新分割器尺寸
@@ -1135,7 +1165,7 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         else:
             # 恢复侧边栏
             self.left_sidebar.setFixedWidth(500)  # 固定宽度500px
-            self.toggle_sidebar_btn.setText("l")  # 使用基本ASCII字符
+            self.toggle_sidebar_btn.setIcon(QIcon(":/images/icons/dropleft.svg"))  # 切换图标为左箭头
             self.sidebar_expanded = True
             
             # 更新分割器尺寸
@@ -1355,18 +1385,18 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
                     Qt.SmoothTransformation
                 ))
             else:
-                # 无图像时显示默认文本
+                # 无图像时显示默认文本，使用加大字号的样式使提示更明显
                 if hasattr(self, 'image_label') and self.image_label:
                     if self.current_image_mode == "rgb":
                         if not self.topic_subscriber or not self.topic_subscriber.is_topic_active("camera"):
-                            self.image_label.setText("等待RGB图像话题连接...")
+                            self.image_label.setText("<div style='font-size: 16pt; color: #3498DB; text-align: center; margin-top: 200px;'>等待RGB图像话题连接...</div>")
                         else:
-                            self.image_label.setText("等待RGB图像数据...")
+                            self.image_label.setText("<div style='font-size: 16pt; color: #3498DB; text-align: center; margin-top: 200px;'>等待RGB图像数据...</div>")
                     else:  # depth模式
                         if not self.topic_subscriber or not self.topic_subscriber.is_topic_active("depth"):
-                            self.image_label.setText("等待深度图像话题连接...")
+                            self.image_label.setText("<div style='font-size: 16pt; color: #3498DB; text-align: center; margin-top: 200px;'>等待深度图像话题连接...</div>")
                         else:
-                            self.image_label.setText("等待深度图像数据...")
+                            self.image_label.setText("<div style='font-size: 16pt; color: #3498DB; text-align: center; margin-top: 200px;'>等待深度图像数据...</div>")
         except Exception as e:
             print(f"更新图像显示时出错: {str(e)}")
             self.image_label.setText(f"图像显示错误: {str(e)}")
@@ -1465,202 +1495,40 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
             if hasattr(self, 'ground_speed_label'):
                 self.ground_speed_label.setText(f"{linear_speed:.4f} m/s")
             
-            # 模拟连接状态变化(偶尔会变化)
-            if hasattr(self, 'connection_label') and random.random() < 0.001:
-                connected = random.choice([True, False])
-                if connected:
-                    self.connection_label.setText("已连接")
-                    self.connection_label.setStyleSheet("color: #2ECC71;")
-                else:
+            # 当没有/mavros/state话题连接时，显示为未连接状态
+            if hasattr(self, 'connection_label'):
+                if not self.topic_subscriber or not self.topic_subscriber.is_topic_active("status"):
+                    # 未连接状态
                     self.connection_label.setText("未连接")
                     self.connection_label.setStyleSheet("color: #E74C3C;")
+                # 注意：如果话题已连接，则由updateStatusDisplay函数更新状态
             
-            # 模拟模式变化(偶尔会变化)
-            if hasattr(self, 'mode_label') and random.random() < 0.001:
-                modes = ["MANUAL", "AUTO", "GUIDED", "STABILIZE", "LOITER"]
-                self.mode_label.setText(random.choice(modes))
+            # 当没有/mavros/state话题连接时，显示为未知模式
+            if hasattr(self, 'mode_label'):
+                if not self.topic_subscriber or not self.topic_subscriber.is_topic_active("status"):
+                    self.mode_label.setText("未连接")  # 显示未连接而非随机模式
             
-            # 模拟图像生成 - 仅在没有真实图像数据时
-            if not hasattr(self, 'sim_image_count'):
-                self.sim_image_count = 0
+            # 话题未连接时，不生成模拟图像，只更新UI显示消息
+            
+            # 更新RGB图像显示文本 - 使用自定义HTML样式显示
+            if (not self.topic_subscriber or not self.topic_subscriber.is_topic_active("camera")) and hasattr(self, 'image_label'):
+                if self.current_image_mode == "rgb":  # 只在RGB模式下更新
+                    self.image_label.setText("<div style='font-size: 16pt; color: #3498DB; text-align: center; margin-top: 200px;'>等待RGB图像话题连接...</div>")
+                # 确保未使用模拟图像
+                self.camera_image = None
                 
-            # 创建模拟RGB图像
-            if not self.topic_subscriber or not self.topic_subscriber.is_topic_active("camera"):
-                width, height = 640, 480
-                sim_rgb_image = np.zeros((height, width, 3), dtype=np.uint8)
+            # 更新深度图像显示文本 - 使用自定义HTML样式显示
+            if (not self.topic_subscriber or not self.topic_subscriber.is_topic_active("depth")) and hasattr(self, 'image_label'):
+                if self.current_image_mode == "depth":  # 只在深度模式下更新
+                    self.image_label.setText("<div style='font-size: 16pt; color: #3498DB; text-align: center; margin-top: 200px;'>等待深度图像话题连接...</div>")
+                # 确保未使用模拟图像
+                self.depth_image = None
                 
-                # 添加背景色 - 深蓝色
-                sim_rgb_image[:, :] = [25, 35, 45]  # BGR格式
-                
-                # 添加渐变效果
-                for y in range(height):
-                    factor = y / height
-                    sim_rgb_image[y, :] = [
-                        min(255, int(25 + 30 * factor)),
-                        min(255, int(35 + 40 * factor)),
-                        min(255, int(45 + 50 * factor))
-                    ]
-                
-                # 添加文本 - 显示模拟模式
-                font = cv2.FONT_HERSHEY_SIMPLEX
-                cv2.putText(
-                    sim_rgb_image,
-                    "RGB模拟图像模式",
-                    (width//2 - 100, height//2 - 30),
-                    font, 1,
-                    (255, 255, 255),
-                    2,
-                    cv2.LINE_AA
-                )
-                
-                # 添加时间戳
-                cv2.putText(
-                    sim_rgb_image,
-                    f"时间: {time.time():.2f}",
-                    (width//2 - 80, height//2 + 10),
-                    font, 0.7,
-                    (200, 200, 200),
-                    1,
-                    cv2.LINE_AA
-                )
-                
-                # 添加动态效果 - 移动的点
-                self.sim_image_count += 1
-                angle = self.sim_image_count * 0.1
-                radius = 100
-                center_x = width//2 + int(radius * math.cos(angle))
-                center_y = height//2 + int(radius * math.sin(angle))
-                cv2.circle(sim_rgb_image, (center_x, center_y), 10, (0, 165, 255), -1)
-                
-                # 添加扫描线效果
-                scan_line = int((height - 1) * (0.5 + 0.5 * math.sin(time.time() * 2)))
-                sim_rgb_image[scan_line, :] = [100, 200, 255]
-                
-                # 设置模拟RGB图像
-                self.camera_image = sim_rgb_image
-                
-            # 创建模拟深度图像
-            if not self.topic_subscriber or not self.topic_subscriber.is_topic_active("depth"):
-                width, height = 640, 480
-                # 创建模拟深度图 - 单通道16位图像
-                sim_depth_image = np.zeros((height, width), dtype=np.uint16)
-                
-                # 创建深度渐变效果 - 从近到远
-                for y in range(height):
-                    for x in range(width):
-                        # 计算到中心的距离
-                        dx = x - width // 2
-                        dy = y - height // 2
-                        distance = math.sqrt(dx*dx + dy*dy)
-                        
-                        # 基于距离和时间创建波纹效果
-                        wave = math.sin(distance * 0.1 - time.time() * 3) * 0.5 + 0.5
-                        depth_value = int(5000 + wave * 10000)  # 模拟5000-15000范围的深度值 (单位: mm)
-                        sim_depth_image[y, x] = depth_value
-                
-                # 创建模拟障碍物 - 近处物体 (黑色)
-                obstacle_radius = 50 + int(20 * math.sin(time.time() * 2))
-                cv2.circle(sim_depth_image, 
-                          (width//2 + 100, height//2 - 50), 
-                          obstacle_radius, 
-                          1000,  # 近距离值
-                          -1)    # 填充圆
-                
-                # 添加模拟人物轮廓 - 中等距离
-                person_y = height//2 + 50
-                person_x = width//2 - 100 + int(50 * math.sin(time.time() * 1.5))
-                # 头部
-                cv2.circle(sim_depth_image, 
-                          (person_x, person_y - 60), 
-                          20, 
-                          3000,  # 中等距离值
-                          -1)
-                # 身体
-                cv2.rectangle(sim_depth_image,
-                             (person_x - 20, person_y - 40),
-                             (person_x + 20, person_y + 40),
-                             3000,
-                             -1)
-                                
-                # 设置模拟深度图像
-                self.depth_image = sim_depth_image
-                
-            # 创建模拟鸟瞰图
-            if not self.topic_subscriber or not self.topic_subscriber.is_topic_active("bird_view"):
-                width, height = 640, 240
-                # 创建模拟鸟瞰图 - 3通道彩色图像
-                sim_bird_view = np.zeros((height, width, 3), dtype=np.uint8)
-                
-                # 背景 - 黑色
-                sim_bird_view[:, :] = [0, 0, 0]  # 黑色背景
-                
-                # 创建模拟栅格地图
-                cell_size = 20  # 每个栅格的大小
-                for y in range(0, height, cell_size):
-                    for x in range(0, width, cell_size):
-                        # 创建棋盘格效果
-                        if (x // cell_size + y // cell_size) % 2 == 0:
-                            sim_bird_view[y:y+cell_size, x:x+cell_size] = [20, 20, 20]  # 深灰色
-                
-                # 绘制中心坐标系
-                center_x, center_y = width // 2, height // 2
-                # X轴(红色)
-                cv2.line(sim_bird_view, (center_x, center_y), (center_x + 100, center_y), (0, 0, 200), 2)
-                # Y轴(绿色)
-                cv2.line(sim_bird_view, (center_x, center_y), (center_x, center_y - 50), (0, 200, 0), 2)
-                
-                # 绘制无人机位置(当前位置)
-                cv2.circle(sim_bird_view, (center_x, center_y), 10, (0, 255, 255), -1)  # 黄色圆点
-                
-                # 绘制无人机朝向
-                angle = time.time() * 0.5  # 随时间旋转
-                direction_x = int(30 * math.cos(angle))
-                direction_y = int(30 * math.sin(angle))
-                cv2.line(sim_bird_view, 
-                        (center_x, center_y), 
-                        (center_x + direction_x, center_y - direction_y), 
-                        (0, 255, 255), 2)
-                
-                # 添加模拟障碍物
-                for i in range(5):  # 5个障碍物
-                    # 障碍物位置随时间变化
-                    obs_angle = math.pi * 2 * i / 5 + time.time() * 0.2
-                    obs_distance = 80 + 40 * math.sin(time.time() * 0.5 + i)
-                    obs_x = center_x + int(obs_distance * math.cos(obs_angle))
-                    obs_y = center_y - int(obs_distance * math.sin(obs_angle))
-                    
-                    # 绘制障碍物(红色)
-                    cv2.circle(sim_bird_view, (obs_x, obs_y), 8, (0, 0, 255), -1)
-                
-                # 添加文字标注
-                font = cv2.FONT_HERSHEY_SIMPLEX
-                cv2.putText(
-                    sim_bird_view,
-                    "障碍物鸟瞰图(模拟)",
-                    (10, 30),
-                    font, 0.8,
-                    (255, 255, 255),
-                    1,
-                    cv2.LINE_AA
-                )
-                
-                # 添加比例尺
-                cv2.line(sim_bird_view, (width - 110, height - 20), (width - 10, height - 20), (200, 200, 200), 2)
-                cv2.putText(
-                    sim_bird_view,
-                    "5米",
-                    (width - 70, height - 30),
-                    font, 0.6,
-                    (200, 200, 200),
-                    1,
-                    cv2.LINE_AA
-                )
-                
-                # 设置模拟鸟瞰图
-                self.bird_view_image = sim_bird_view
-                
-                # 更新显示
-                self.updateBirdViewDisplay()
+            # 更新鸟瞰图显示文本 - 使用自定义HTML样式显示
+            if (not self.topic_subscriber or not self.topic_subscriber.is_topic_active("bird_view")) and hasattr(self, 'bird_view_label'):
+                self.bird_view_label.setText("<div style='font-size: 14pt; color: #3498DB; text-align: center; margin-top: 100px;'>等待鸟瞰图话题连接...</div>")
+                # 确保未使用模拟图像
+                self.bird_view_image = None
         
         # 每次渲染帧时增加计数器
         self.frame_count += 1
@@ -1671,7 +1539,7 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
             # 隐藏右侧栏
             self.right_sidebar.setMaximumWidth(0)
             self.right_sidebar.setMinimumWidth(0)
-            self.toggle_right_sidebar_btn.setText("<")  # 使用基本ASCII字符
+            self.toggle_right_sidebar_btn.setIcon(QIcon(":/images/icons/dropleft.svg"))  # 切换图标为左箭头
             self.right_sidebar_expanded = False
             
             # 更新分割器尺寸，将右侧栏的空间分配给中间的RViz区域
@@ -1681,7 +1549,7 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         else:
             # 恢复右侧栏
             self.right_sidebar.setFixedWidth(650)  # 固定宽度650px
-            self.toggle_right_sidebar_btn.setText(">")  # 使用基本ASCII字符
+            self.toggle_right_sidebar_btn.setIcon(QIcon(":/images/icons/dropright.svg"))  # 切换图标为右箭头
             self.right_sidebar_expanded = True
             
             # 更新分割器尺寸，从中间区域分配空间给右侧栏
@@ -1846,11 +1714,11 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
                 # 无图像时显示默认文本
                 if hasattr(self, 'bird_view_label') and self.bird_view_label:
                     topic_active = self.topic_subscriber and self.topic_subscriber.is_topic_active("bird_view")
-                    print(f"鸟瞰图为空，话题状态: {'活跃' if topic_active else '未连接'}")
+                    # 移除调试打印，减少控制台输出
                     if not topic_active:
-                        self.bird_view_label.setText("等待鸟瞰图话题连接...")
+                        self.bird_view_label.setText("<div style='font-size: 14pt; color: #3498DB; text-align: center; margin-top: 100px;'>等待鸟瞰图话题连接...</div>")
                     else:
-                        self.bird_view_label.setText("等待鸟瞰图数据...")
+                        self.bird_view_label.setText("<div style='font-size: 14pt; color: #3498DB; text-align: center; margin-top: 100px;'>等待鸟瞰图数据...</div>")
         except Exception as e:
             import traceback
             print(f"鸟瞰图显示更新错误: {str(e)}")
@@ -2017,7 +1885,7 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         if not selected_items:
             QMessageBox.warning(self, "提示", "请先选择要更新的人员")
             return
-        
+            
         # 获取唯一的行
         selected_rows = set()
         for item in selected_items:
@@ -2106,6 +1974,59 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
             
         self.position_table.setItem(row, 3, status_item)
         print(f"已将ID为{person_id}的人员状态更新为{new_status}")
+    
+    def onResize(self, event):
+        """窗口大小变化时调整组件尺寸"""
+        try:
+            # 获取当前窗口大小
+            window_height = self.height()
+            window_width = self.width()
+            
+            # 根据窗口大小动态调整布局
+            if window_height < 800:
+                # 调整鸟瞰图尺寸
+                if hasattr(self, 'bird_view_label'):
+                    new_height = max(120, int(window_height * 0.15))  # 最小120px
+                    self.bird_view_label.setFixedHeight(new_height)
+                
+                # 调整图像标签尺寸
+                if hasattr(self, 'image_label'):
+                    new_height = max(240, int(window_height * 0.3))  # 最小240px
+                    self.image_label.setFixedHeight(new_height)
+                
+                # 小窗口模式下简化功能组标题，避免截断
+                if hasattr(self, 'function_group') and window_width < 1600:
+                    self.function_group.setTitle(" 控制中心 ")
+            else:
+                # 恢复默认尺寸
+                if hasattr(self, 'bird_view_label'):
+                    self.bird_view_label.setFixedSize(640, 240)
+                
+                if hasattr(self, 'image_label'):
+                    self.image_label.setFixedSize(640, 480)
+                
+                # 大窗口模式下扩展功能组标题
+                if hasattr(self, 'function_group') and window_width >= 1600:
+                    self.function_group.setTitle("   控制中心   ")
+            
+            # 调用原始的resizeEvent
+            QMainWindow.resizeEvent(self, event)
+        except Exception as e:
+            print(f"调整窗口大小时出错: {str(e)}")
+            # 确保原始事件被处理
+            QMainWindow.resizeEvent(self, event)
+    
+    def updateCameraImage(self, camera_data):
+        """处理摄像头图像更新"""
+        try:
+            if not camera_data or camera_data["image"] is None:
+                return
+                
+            # 保存最新图像
+            self.camera_image = camera_data["image"]
+            
+        except Exception as e:
+            print(f"处理图像更新时出错: {str(e)}")
 
 ## Start the Application
 ## ^^^^^^^^^^^^^^^^^^^^^
@@ -2129,19 +2050,18 @@ if __name__ == '__main__':
     # 创建主窗口
     myviz = MyViz()
     
-    # 获取可用屏幕区域（考虑任务栏/面板）
+            # 获取可用屏幕区域（考虑任务栏/面板）
     desktop = QDesktopWidget()
     available_geometry = desktop.availableGeometry(desktop.primaryScreen())
     width = available_geometry.width()
     height = available_geometry.height()
     print(f"可用屏幕区域: {width}x{height}, 位置: ({available_geometry.x()}, {available_geometry.y()})")
     
-    # 将窗口大小设置为比可用屏幕区域更小，确保不会超出屏幕
-    # 在高度上额外减去40像素，考虑窗口标题栏高度和可能的边框
-    myviz.setGeometry(available_geometry.x(), available_geometry.y(), width - 10, height - 40)
+    # 直接以最大化模式启动窗口
+    myviz.showMaximized()
     
-    # 显示窗口
-    myviz.show()
+    # 不再需要单独调用show()，showMaximized()已经包含了show()功能
+    # myviz.show()
     
     # 启动Qt事件循环
     try:
