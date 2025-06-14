@@ -55,7 +55,7 @@ except ImportError:
 from rviz import bindings as rviz
 
 ## The MyViz class is the main container widget.
-class MyViz( QWidget ):
+class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
 
     ## MyViz Constructor
     ## ^^^^^^^^^^^^^^^^^
@@ -64,7 +64,7 @@ class MyViz( QWidget ):
     ## frame, thickness_slider, top_button, and side_button, and adds them
     ## to layouts.
     def __init__(self):
-        QWidget.__init__(self)
+        QMainWindow.__init__(self)  # 初始化QMainWindow
         
         # 电池状态变量
         self.battery_percentage = 100.0
@@ -78,6 +78,13 @@ class MyViz( QWidget ):
         self.camera_image = None
         self.depth_image = None
         self.bird_view_image = None
+        
+        # 设置窗口标题
+        self.setWindowTitle("无人机自主搜救系统")
+        
+        # 创建中央控件
+        self.central_widget = QWidget()
+        self.setCentralWidget(self.central_widget)
         
         # 设置窗口样式，使用黑蓝色调
         self.setStyleSheet("""
@@ -149,10 +156,6 @@ class MyViz( QWidget ):
             }
         """)
         
-        # 设置窗口标志，使标题栏更宽
-        self.setWindowFlags(Qt.Window | Qt.CustomizeWindowHint | Qt.WindowTitleHint | 
-                           Qt.WindowSystemMenuHint | Qt.WindowMinMaxButtonsHint | Qt.WindowCloseButtonHint)
-        
         ## rviz.VisualizationFrame是RViz应用程序的主容器窗口小部件
         self.frame = rviz.VisualizationFrame()
         self.frame.setSplashPath("")
@@ -163,9 +166,6 @@ class MyViz( QWidget ):
         config = rviz.Config()
         reader.readFile(config, "my_config.rviz")
         self.frame.load(config)
-
-        ## 设置窗口标题
-        self.setWindowTitle("无人机自主搜救系统")
         
         # 初始化日志窗口
         self.log_window = None
@@ -180,7 +180,7 @@ class MyViz( QWidget ):
         self.grid_display = self.manager.getRootDisplayGroup().getDisplayAt(0)
         
         ## 创建主布局
-        main_layout = QVBoxLayout()
+        main_layout = QVBoxLayout(self.central_widget)
         main_layout.setContentsMargins(10, 15, 10, 10)  # 增加上边距
         main_layout.setSpacing(10)  # 增加组件间距
         
@@ -772,6 +772,122 @@ class MyViz( QWidget ):
         
         # 添加弹性空间在顶部
         right_sidebar_layout.addStretch(1)
+        
+        # 添加待搜救人员位置窗口
+        person_position_group = QGroupBox("待搜救人员位置")
+        person_position_group.setStyleSheet("color: #3498DB; font-size: 14pt;")  # 设置标题样式
+        person_position_layout = QVBoxLayout(person_position_group)
+        person_position_layout.setContentsMargins(10, 20, 10, 10)  # 增加内边距
+        person_position_layout.setSpacing(15)  # 增加组件间距
+        
+        # 创建位置显示区域
+        position_frame = QFrame()
+        position_frame.setFrameShape(QFrame.StyledPanel)
+        position_frame.setStyleSheet("background-color: #1A202C; border-radius: 10px; border: 1px solid #3498DB;")
+        position_frame_layout = QVBoxLayout(position_frame)
+        position_frame_layout.setContentsMargins(10, 10, 10, 10)
+        
+        # 创建位置信息表格
+        self.position_table = QTableWidget()
+        self.position_table.setColumnCount(4)
+        self.position_table.setHorizontalHeaderLabels(["ID", "X坐标", "Y坐标", "状态"])
+        self.position_table.setStyleSheet("""
+            QTableWidget {
+                background-color: #1E2330;
+                color: white;
+                gridline-color: #3498DB;
+                border: none;
+            }
+            QHeaderView::section {
+                background-color: #2C3E50;
+                color: white;
+                padding: 5px;
+                border: 1px solid #3498DB;
+            }
+            QTableWidget::item {
+                border-bottom: 1px solid #3498DB;
+                padding: 5px;
+            }
+            QTableWidget::item:selected {
+                background-color: #3498DB;
+            }
+        """)
+        self.position_table.horizontalHeader().setStretchLastSection(True)
+        self.position_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
+        self.position_table.verticalHeader().setVisible(False)
+        self.position_table.setMinimumHeight(150)
+        self.position_table.setMaximumHeight(250)
+        
+        # 将表格初始化为空
+        self.position_table.setRowCount(0)
+        
+        # 添加表格到位置框架
+        position_frame_layout.addWidget(self.position_table)
+        
+        # 添加操作按钮区域
+        button_container = QWidget()
+        button_layout = QHBoxLayout(button_container)
+        button_layout.setContentsMargins(0, 5, 0, 0)
+        button_layout.setSpacing(10)
+        
+        # 添加按钮
+        add_btn = QPushButton("添加")
+        add_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #2980B9;
+                color: white;
+                border-radius: 4px;
+                padding: 5px 15px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #3498DB;
+            }
+        """)
+        add_btn.clicked.connect(self.addPerson)
+        
+        remove_btn = QPushButton("删除")
+        remove_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #C0392B;
+                color: white;
+                border-radius: 4px;
+                padding: 5px 15px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #E74C3C;
+            }
+        """)
+        remove_btn.clicked.connect(self.removePerson)
+        
+        update_btn = QPushButton("更新状态")
+        update_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #27AE60;
+                color: white;
+                border-radius: 4px;
+                padding: 5px 15px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #2ECC71;
+            }
+        """)
+        update_btn.clicked.connect(self.updatePersonStatus)
+        
+        button_layout.addWidget(add_btn)
+        button_layout.addWidget(remove_btn)
+        button_layout.addWidget(update_btn)
+        
+        # 添加按钮容器到位置框架
+        position_frame_layout.addWidget(button_container)
+        
+        # 添加位置框架到位置组
+        person_position_layout.addWidget(position_frame)
+        
+        # 添加位置组到右侧栏
+        right_sidebar_layout.addWidget(person_position_group)
         
         # 在底部添加图像显示区域和控制按钮
         image_display_container = QWidget()
@@ -1740,6 +1856,256 @@ class MyViz( QWidget ):
             print(f"鸟瞰图显示更新错误: {str(e)}")
             print(traceback.format_exc())
             self.bird_view_label.setText(f"鸟瞰图显示错误: {str(e)}")
+    
+    # 添加人员位置管理功能
+    def addPerson(self):
+        """添加搜救人员位置"""
+        # 创建对话框
+        dialog = QDialog(self)
+        dialog.setWindowTitle("添加待搜救人员")
+        dialog.setFixedWidth(300)
+        dialog.setStyleSheet("""
+            QDialog {
+                background-color: #1E2330;
+                color: #FFFFFF;
+            }
+            QLabel {
+                color: #FFFFFF;
+                font-size: 12px;
+            }
+            QLineEdit {
+                padding: 5px;
+                border: 1px solid #3498DB;
+                border-radius: 3px;
+                background-color: #2C3E50;
+                color: white;
+                selection-background-color: #3498DB;
+            }
+            QPushButton {
+                background-color: #2980B9;
+                color: white;
+                border-radius: 4px;
+                padding: 5px 15px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #3498DB;
+            }
+            QComboBox {
+                padding: 5px;
+                border: 1px solid #3498DB;
+                border-radius: 3px;
+                background-color: #2C3E50;
+                color: white;
+            }
+            QComboBox::drop-down {
+                border: 0px;
+            }
+            QComboBox::down-arrow {
+                image: url(:/images/icons/dropdown.svg);
+                width: 12px;
+                height: 12px;
+            }
+            QComboBox QAbstractItemView {
+                background-color: #2C3E50;
+                color: white;
+                selection-background-color: #3498DB;
+                border: 1px solid #3498DB;
+            }
+        """)
+        
+        # 创建对话框布局
+        layout = QVBoxLayout(dialog)
+        
+        # 添加表单字段
+        form_layout = QFormLayout()
+        
+        # ID字段（自动生成）
+        next_id = self.position_table.rowCount() + 1
+        id_label = QLabel(f"ID: {next_id}")
+        form_layout.addRow("", id_label)
+        
+        # X坐标字段
+        x_edit = QLineEdit()
+        x_edit.setValidator(QDoubleValidator())  # 接受浮点数
+        form_layout.addRow("X坐标:", x_edit)
+        
+        # Y坐标字段
+        y_edit = QLineEdit()
+        y_edit.setValidator(QDoubleValidator())  # 接受浮点数
+        form_layout.addRow("Y坐标:", y_edit)
+        
+        # 状态字段
+        status_combo = QComboBox()
+        status_combo.addItems(["待确认", "已确认", "已救援"])
+        form_layout.addRow("状态:", status_combo)
+        
+        layout.addLayout(form_layout)
+        
+        # 添加按钮区
+        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        button_box.accepted.connect(dialog.accept)
+        button_box.rejected.connect(dialog.reject)
+        layout.addWidget(button_box)
+        
+        # 执行对话框
+        if dialog.exec_() == QDialog.Accepted:
+            try:
+                # 获取输入值
+                x_value = x_edit.text()
+                y_value = y_edit.text()
+                status = status_combo.currentText()
+                
+                # 验证输入
+                if not x_value or not y_value:
+                    QMessageBox.warning(self, "输入错误", "X坐标和Y坐标不能为空")
+                    return
+                    
+                # 添加到表格
+                row_position = self.position_table.rowCount()
+                self.position_table.insertRow(row_position)
+                
+                # 设置单元格值
+                self.position_table.setItem(row_position, 0, QTableWidgetItem(str(next_id)))
+                self.position_table.setItem(row_position, 1, QTableWidgetItem(x_value))
+                self.position_table.setItem(row_position, 2, QTableWidgetItem(y_value))
+                status_item = QTableWidgetItem(status)
+                
+                # 设置状态颜色
+                if status == "待确认":
+                    status_item.setForeground(QBrush(QColor("#F39C12")))  # 橙色
+                elif status == "已确认":
+                    status_item.setForeground(QBrush(QColor("#2ECC71")))  # 绿色
+                elif status == "已救援":
+                    status_item.setForeground(QBrush(QColor("#3498DB")))  # 蓝色
+                    
+                self.position_table.setItem(row_position, 3, status_item)
+                
+                print(f"已添加新的搜救人员: ID={next_id}, X={x_value}, Y={y_value}, 状态={status}")
+            except Exception as e:
+                print(f"添加人员时出错: {str(e)}")
+                QMessageBox.critical(self, "错误", f"添加人员时出错: {str(e)}")
+    
+    def removePerson(self):
+        """删除选中的搜救人员"""
+        # 获取选中的行
+        selected_rows = set()
+        for item in self.position_table.selectedItems():
+            selected_rows.add(item.row())
+        
+        if not selected_rows:
+            QMessageBox.warning(self, "提示", "请先选择要删除的人员")
+            return
+        
+        # 确认是否删除
+        confirm = QMessageBox.question(self, "确认删除", 
+                                     f"确定要删除选中的{len(selected_rows)}个人员吗？", 
+                                     QMessageBox.Yes | QMessageBox.No)
+        
+        if confirm == QMessageBox.Yes:
+            # 从后向前删除行(避免索引变化)
+            for row in sorted(selected_rows, reverse=True):
+                person_id = self.position_table.item(row, 0).text()
+                self.position_table.removeRow(row)
+                print(f"已删除ID为{person_id}的人员记录")
+    
+    def updatePersonStatus(self):
+        """更新选中人员的状态"""
+        # 获取选中的行
+        selected_items = self.position_table.selectedItems()
+        
+        if not selected_items:
+            QMessageBox.warning(self, "提示", "请先选择要更新的人员")
+            return
+        
+        # 获取唯一的行
+        selected_rows = set()
+        for item in selected_items:
+            selected_rows.add(item.row())
+        
+        if len(selected_rows) > 1:
+            # 创建状态选择对话框
+            dialog = QDialog(self)
+            dialog.setWindowTitle("批量更新状态")
+            dialog.setFixedWidth(250)
+            dialog.setStyleSheet("""
+                QDialog {
+                    background-color: #1E2330;
+                    color: #FFFFFF;
+                }
+                QLabel {
+                    color: #FFFFFF;
+                    font-size: 12px;
+                }
+                QPushButton {
+                    background-color: #2980B9;
+                    color: white;
+                    border-radius: 4px;
+                    padding: 5px 15px;
+                    font-weight: bold;
+                }
+                QPushButton:hover {
+                    background-color: #3498DB;
+                }
+                QComboBox {
+                    padding: 5px;
+                    border: 1px solid #3498DB;
+                    border-radius: 3px;
+                    background-color: #2C3E50;
+                    color: white;
+                }
+            """)
+            
+            layout = QVBoxLayout(dialog)
+            
+            # 状态选择
+            layout.addWidget(QLabel(f"为{len(selected_rows)}个选中人员设置新状态:"))
+            status_combo = QComboBox()
+            status_combo.addItems(["待确认", "已确认", "已救援"])
+            layout.addWidget(status_combo)
+            
+            # 按钮
+            button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+            button_box.accepted.connect(dialog.accept)
+            button_box.rejected.connect(dialog.reject)
+            layout.addWidget(button_box)
+            
+            # 执行对话框
+            if dialog.exec_() == QDialog.Accepted:
+                new_status = status_combo.currentText()
+                # 更新所有选中行的状态
+                for row in selected_rows:
+                    self._updateRowStatus(row, new_status)
+        else:
+            # 单行更新，直接循环状态
+            row = list(selected_rows)[0]
+            current_status = self.position_table.item(row, 3).text()
+            
+            # 状态循环: 待确认 -> 已确认 -> 已救援 -> 待确认
+            if current_status == "待确认":
+                new_status = "已确认"
+            elif current_status == "已确认":
+                new_status = "已救援"
+            else:
+                new_status = "待确认"
+            
+            self._updateRowStatus(row, new_status)
+    
+    def _updateRowStatus(self, row, new_status):
+        """更新指定行的状态"""
+        person_id = self.position_table.item(row, 0).text()
+        status_item = QTableWidgetItem(new_status)
+        
+        # 设置状态颜色
+        if new_status == "待确认":
+            status_item.setForeground(QBrush(QColor("#F39C12")))  # 橙色
+        elif new_status == "已确认":
+            status_item.setForeground(QBrush(QColor("#2ECC71")))  # 绿色
+        elif new_status == "已救援":
+            status_item.setForeground(QBrush(QColor("#3498DB")))  # 蓝色
+            
+        self.position_table.setItem(row, 3, status_item)
+        print(f"已将ID为{person_id}的人员状态更新为{new_status}")
 
 ## Start the Application
 ## ^^^^^^^^^^^^^^^^^^^^^
@@ -1763,12 +2129,20 @@ if __name__ == '__main__':
     # 创建主窗口
     myviz = MyViz()
     
-    # 设置窗口全屏显示
-    desktop = QApplication.desktop()
-    screen_rect = desktop.screenGeometry()
-    myviz.resize(screen_rect.width(), screen_rect.height())
+    # 获取可用屏幕区域（考虑任务栏/面板）
+    desktop = QDesktopWidget()
+    available_geometry = desktop.availableGeometry(desktop.primaryScreen())
+    width = available_geometry.width()
+    height = available_geometry.height()
+    print(f"可用屏幕区域: {width}x{height}, 位置: ({available_geometry.x()}, {available_geometry.y()})")
+    
+    # 将窗口大小设置为比可用屏幕区域更小，确保不会超出屏幕
+    # 在高度上额外减去40像素，考虑窗口标题栏高度和可能的边框
+    myviz.setGeometry(available_geometry.x(), available_geometry.y(), width - 10, height - 40)
+    
+    # 显示窗口
     myviz.show()
-
+    
     # 启动Qt事件循环
     try:
         exit_code = app.exec_()
