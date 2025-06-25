@@ -21,5 +21,18 @@
         <file>images/icons/dropdown.svg</file>
         <file>images/icons/dropleft.svg</file>
         <file>images/icons/dropright.svg</file>
+        <file>images/icons/attitudebg.png</file>
+        <file>images/icons/attitudebg1.png</file>
+        <file>images/icons/attitudefg.png</file>
+        <file>images/icons/attitudefg2.png</file>
+        <file>images/icons/battery_50.png</file>
+        <file>images/icons/battery_75.png</file>
+        <file>images/icons/battery_full.png</file>
+        <file>images/icons/battery_low.png</file>
+        <file>images/icons/compassbg.png</file>
+        <file>images/icons/needle.png</file>
+        <file>images/icons/needle2.png</file>
+        <file>images/icons/pointy.png</file>
+        <file>images/icons/speedobg.png</file>
     </qresource>
 </RCC>
