@@ -1,0 +1,33 @@
+# Python缓存文件
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# 日志文件
+log/
+*.log
+
+# VSCode配置
+.vscode/
+*.code-workspace
+
+# 虚拟环境
+venv/
+env/
+.env/
+
+# 其他Python临时文件
+.ipynb_checkpoints/
+.coverage
+htmlcov/
+.pytest_cache/
+
+# 构建和分发目录
+build/
+dist/
+*.egg-info/
+
+# 系统文件
+.DS_Store
+Thumbs.db 

@@ -24,9 +24,9 @@
         "fields": ["linear", "angular"]
     },
     "camera": {
-        "topic": "/camera/color/image_raw",
+        "topic": "/image_converter/output_video",
         "msg_type": "sensor_msgs/Image",
-        "description": "无人机RGB摄像头图像",
+        "description": "无人机RGB检测图像",
         "fields": ["data", "encoding", "width", "height"]
     },
     "depth": {
@@ -44,7 +44,7 @@
     "marker": {
         "topic": "/visualization_marker",
         "msg_type": "visualization_msgs/Marker",
-        "description": "搜救人员标记点",
+        "description": "搜索人员标记点",
         "fields": ["id", "type", "pose", "scale", "color", "action"]
     }
 } 

@@ -1,15 +1,16 @@
-Title: 无人机自主搜救系统
+Title: 无人机自主搜索系统
 Panels:
   - Class: rviz/Displays
     Name: Displays
     Property Tree Widget:
       Expanded:
+        - /Axes1
+        - /Planning1
         - /Planning1/executed_traj1/Status1
         - /active_perception1/viewpoint1/Namespaces1
         - /LocalMap1/occupied_all1/Autocompute Value Bounds1
         - /processed_msg1/Namespaces1
         - /PointCloud21/Autocompute Value Bounds1
-        - /Axes2/Status1
       Splitter Ratio: 0.5216138362884521
     Tree Height: 800
   - Class: rviz/Selection
@@ -29,7 +30,7 @@ Panels:
   - Class: rviz/Time
     Name: Time
     SyncMode: 0
-    SyncSource: occupied_local_inflate
+    SyncSource: ""
 Preferences:
   PromptSaveOnExit: true
 Toolbars:
@@ -43,7 +44,7 @@ Visualization Manager:
       Length: 1
       Name: Axes
       Radius: 0.20000000298023224
-      Reference Frame: <Fixed Frame>
+      Reference Frame: body
       Show Trail: false
       Value: true
     - Alpha: 0.5
@@ -273,6 +274,30 @@ Visualization Manager:
         {}
       Queue Size: 100
       Value: true
+    - Alpha: 1
+      Buffer Length: 1
+      Class: rviz/Path
+      Color: 239; 41; 41
+      Enabled: true
+      Head Diameter: 0.30000001192092896
+      Head Length: 0.20000000298023224
+      Length: 0.30000001192092896
+      Line Style: Billboards
+      Line Width: 0.029999999329447746
+      Name: Path
+      Offset:
+        X: 0
+        Y: 0
+        Z: 0
+      Pose Color: 255; 85; 255
+      Pose Style: None
+      Queue Size: 10
+      Radius: 0.029999999329447746
+      Shaft Diameter: 0.10000000149011612
+      Shaft Length: 0.10000000149011612
+      Topic: /vins_fusion/path
+      Unreliable: false
+      Value: true
   Enabled: true
   Global Options:
     Background Color: 255; 255; 255
@@ -300,7 +325,7 @@ Visualization Manager:
   Views:
     Current:
       Class: rviz/ThirdPersonFollower
-      Distance: 15.722695350646973
+      Distance: 10.408218383789062
       Enable Stereo Rendering:
         Stereo Eye Separation: 0.05999999865889549
         Stereo Focal Distance: 1
@@ -308,17 +333,17 @@ Visualization Manager:
         Value: false
       Field of View: 0.7853981852531433
       Focal Point:
-        X: -1.705756664276123
-        Y: -0.006909191608428955
+        X: -1.7640008926391602
+        Y: 0.19430199265480042
         Z: -3.390304482309148e-05
       Focal Shape Fixed Size: true
       Focal Shape Size: 0.05000000074505806
       Invert Z Axis: false
       Name: Current View
       Near Clip Distance: 0.009999999776482582
-      Pitch: 0.9097970128059387
+      Pitch: 0.7947971224784851
       Target Frame: <Fixed Frame>
-      Yaw: 3.144589900970459
+      Yaw: 3.129589796066284
     Saved:
       - Class: rviz/ThirdPersonFollower
         Distance: 40.93450164794922
