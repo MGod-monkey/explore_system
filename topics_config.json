@@ -46,5 +46,47 @@
         "msg_type": "visualization_msgs/Marker",
         "description": "搜索人员标记点",
         "fields": ["id", "type", "pose", "scale", "color", "action"]
+    },
+    "attitude": {
+        "topic": "/mavros/imu/data",
+        "msg_type": "sensor_msgs/Imu",
+        "description": "无人机姿态信息",
+        "fields": ["orientation", "angular_velocity", "linear_acceleration"]
+    },
+    "mavros_state": {
+        "topic": "/mavros/state",
+        "msg_type": "mavros_msgs/State",
+        "description": "飞行模式和状态",
+        "fields": ["connected", "armed", "guided", "mode"]
+    },
+    "mavros_gps": {
+        "topic": "/mavros/global_position/global",
+        "msg_type": "sensor_msgs/NavSatFix",
+        "description": "GPS信息",
+        "fields": ["status", "latitude", "longitude", "altitude"]
+    },
+    "mavros_battery": {
+        "topic": "/mavros/battery",
+        "msg_type": "sensor_msgs/BatteryState",
+        "description": "电池状态",
+        "fields": ["voltage", "current", "percentage", "temperature"]
+    },
+    "mavros_altitude": {
+        "topic": "/mavros/global_position/rel_alt",
+        "msg_type": "std_msgs/Float64",
+        "description": "相对高度",
+        "fields": ["data"]
+    },
+    "mavros_velocity": {
+        "topic": "/mavros/local_position/velocity_local",
+        "msg_type": "geometry_msgs/TwistStamped",
+        "description": "速度信息",
+        "fields": ["linear", "angular"]
+    },
+    "rc_input": {
+        "topic": "/mavros/rc/in",
+        "msg_type": "mavros_msgs/RCIn",
+        "description": "遥控器输入信号",
+        "fields": ["header", "rssi", "channels"]
     }
 } 

@@ -4,11 +4,11 @@
 import json
 import os
 import rospy
-from sensor_msgs.msg import BatteryState, Image
-from mavros_msgs.msg import State
+from sensor_msgs.msg import BatteryState, Image, NavSatFix, Imu
+from mavros_msgs.msg import State, RCIn
 from nav_msgs.msg import Odometry
 from geometry_msgs.msg import TwistStamped
-from std_msgs.msg import Float32
+from std_msgs.msg import Float32, Float64
 from visualization_msgs.msg import Marker
 import threading
 import time
@@ -81,6 +81,49 @@ class TopicsSubscriber:
                 "color": {"r": 0.0, "g": 0.0, "b": 0.0, "a": 0.0},
                 "action": 0,
                 "text": ""
+            },
+            "attitude": {
+                "pitch": 0.0,       # 俯仰角
+                "roll": 0.0,        # 滚转角
+                "yaw": 0.0,         # 偏航角
+                "timestamp": 0.0    # 时间戳
+            },
+            "mavros_state": {
+                "connected": False,
+                "armed": False,
+                "guided": False,
+                "mode": ""
+            },
+            "mavros_gps": {
+                "status": 0,
+                "latitude": 0.0,
+                "longitude": 0.0,
+                "altitude": 0.0
+            },
+            "mavros_battery": {
+                "voltage": 0.0,
+                "current": 0.0, 
+                "percentage": 0.0,
+                "temperature": 0.0
+            },
+            "mavros_altitude": {
+                "relative": 0.0
+            },
+            "mavros_velocity": {
+                "linear": {
+                    "x": 0.0,
+                    "y": 0.0,
+                    "z": 0.0
+                },
+                "angular": {
+                    "x": 0.0,
+                    "y": 0.0,
+                    "z": 0.0
+                }
+            },
+            "rc_input": {
+                "channels": [],
+                "rssi": 0
             }
         }
         
@@ -99,7 +142,14 @@ class TopicsSubscriber:
             "camera": False,
             "depth": False,
             "bird_view": False,
-            "marker": False
+            "marker": False,
+            "attitude": False,
+            "mavros_state": False,
+            "mavros_gps": False,
+            "mavros_battery": False,
+            "mavros_altitude": False,
+            "mavros_velocity": False,
+            "rc_input": False
         }
         
         # 初始化cv_bridge
@@ -226,7 +276,7 @@ class TopicsSubscriber:
                 except Exception as e:
                     rospy.logerr(f"订阅深度图像话题失败: {str(e)}")
         
-        # 检查并订阅鸟瞰图话题
+                            # 检查并订阅鸟瞰图话题
         if "bird_view" in self.config:
             # 尝试强制订阅鸟瞰图话题，不管是否在已发布话题列表中
             if "bird_view" not in self.subscribers or not self.subscribers["bird_view"]:
@@ -240,9 +290,92 @@ class TopicsSubscriber:
                     )
                     self.topics_active["bird_view"] = True
                     rospy.loginfo(f"成功订阅鸟瞰图话题: {self.config['bird_view']['topic']}")
-                    # print(f"鸟瞰图话题订阅状态: {self.topics_active['bird_view']}")
                 except Exception as e:
                     rospy.logerr(f"订阅鸟瞰图话题失败: {str(e)}")
+                    
+        # 检查并订阅MAVROS状态话题
+        if "mavros_state" in self.config and self.config["mavros_state"]["topic"] in published_topics:
+            if "mavros_state" not in self.subscribers or not self.subscribers["mavros_state"]:
+                try:
+                    self.subscribers["mavros_state"] = rospy.Subscriber(
+                        self.config["mavros_state"]["topic"],
+                        State,
+                        self.mavros_state_callback
+                    )
+                    self.topics_active["mavros_state"] = True
+                    rospy.loginfo(f"成功订阅MAVROS状态话题: {self.config['mavros_state']['topic']}")
+                except Exception as e:
+                    rospy.logerr(f"订阅MAVROS状态话题失败: {str(e)}")
+                    
+        # 检查并订阅MAVROS GPS话题
+        if "mavros_gps" in self.config and self.config["mavros_gps"]["topic"] in published_topics:
+            if "mavros_gps" not in self.subscribers or not self.subscribers["mavros_gps"]:
+                try:
+                    self.subscribers["mavros_gps"] = rospy.Subscriber(
+                        self.config["mavros_gps"]["topic"],
+                        NavSatFix,
+                        self.mavros_gps_callback
+                    )
+                    self.topics_active["mavros_gps"] = True
+                    rospy.loginfo(f"成功订阅MAVROS GPS话题: {self.config['mavros_gps']['topic']}")
+                except Exception as e:
+                    rospy.logerr(f"订阅MAVROS GPS话题失败: {str(e)}")
+                    
+        # 检查并订阅MAVROS电池话题
+        if "mavros_battery" in self.config and self.config["mavros_battery"]["topic"] in published_topics:
+            if "mavros_battery" not in self.subscribers or not self.subscribers["mavros_battery"]:
+                try:
+                    self.subscribers["mavros_battery"] = rospy.Subscriber(
+                        self.config["mavros_battery"]["topic"],
+                        BatteryState,
+                        self.mavros_battery_callback
+                    )
+                    self.topics_active["mavros_battery"] = True
+                    rospy.loginfo(f"成功订阅MAVROS电池话题: {self.config['mavros_battery']['topic']}")
+                except Exception as e:
+                    rospy.logerr(f"订阅MAVROS电池话题失败: {str(e)}")
+                    
+        # 检查并订阅MAVROS相对高度话题
+        if "mavros_altitude" in self.config and self.config["mavros_altitude"]["topic"] in published_topics:
+            if "mavros_altitude" not in self.subscribers or not self.subscribers["mavros_altitude"]:
+                try:
+                    self.subscribers["mavros_altitude"] = rospy.Subscriber(
+                        self.config["mavros_altitude"]["topic"],
+                        Float64,
+                        self.mavros_altitude_callback
+                    )
+                    self.topics_active["mavros_altitude"] = True
+                    rospy.loginfo(f"成功订阅MAVROS高度话题: {self.config['mavros_altitude']['topic']}")
+                except Exception as e:
+                    rospy.logerr(f"订阅MAVROS高度话题失败: {str(e)}")
+                    
+        # 检查并订阅MAVROS速度话题
+        if "mavros_velocity" in self.config and self.config["mavros_velocity"]["topic"] in published_topics:
+            if "mavros_velocity" not in self.subscribers or not self.subscribers["mavros_velocity"]:
+                try:
+                    self.subscribers["mavros_velocity"] = rospy.Subscriber(
+                        self.config["mavros_velocity"]["topic"],
+                        TwistStamped,
+                        self.mavros_velocity_callback
+                    )
+                    self.topics_active["mavros_velocity"] = True
+                    rospy.loginfo(f"成功订阅MAVROS速度话题: {self.config['mavros_velocity']['topic']}")
+                except Exception as e:
+                    rospy.logerr(f"订阅MAVROS速度话题失败: {str(e)}")
+                    
+        # 检查并订阅RC输入话题
+        if "rc_input" in self.config and self.config["rc_input"]["topic"] in published_topics:
+            if "rc_input" not in self.subscribers or not self.subscribers["rc_input"]:
+                try:
+                    self.subscribers["rc_input"] = rospy.Subscriber(
+                        self.config["rc_input"]["topic"],
+                        RCIn,
+                        self.rc_input_callback
+                    )
+                    self.topics_active["rc_input"] = True
+                    rospy.loginfo(f"成功订阅RC输入话题: {self.config['rc_input']['topic']}")
+                except Exception as e:
+                    rospy.logerr(f"订阅RC输入话题失败: {str(e)}")
                     print(f"订阅鸟瞰图话题时出错: {str(e)}")
                     self.topics_active["bird_view"] = False
         
@@ -259,6 +392,21 @@ class TopicsSubscriber:
                     rospy.loginfo(f"成功订阅标记点话题: {self.config['marker']['topic']}")
                 except Exception as e:
                     rospy.logerr(f"订阅标记点话题失败: {str(e)}")
+                    
+        # 检查并订阅姿态数据话题
+        if "attitude" in self.config and self.config["attitude"]["topic"] in published_topics:
+            if "attitude" not in self.subscribers or not self.subscribers["attitude"]:
+                try:
+                    from sensor_msgs.msg import Imu
+                    self.subscribers["attitude"] = rospy.Subscriber(
+                        self.config["attitude"]["topic"],
+                        Imu,
+                        self.attitude_callback
+                    )
+                    self.topics_active["attitude"] = True
+                    rospy.loginfo(f"成功订阅姿态数据话题: {self.config['attitude']['topic']}")
+                except Exception as e:
+                    rospy.logerr(f"订阅姿态数据话题失败: {str(e)}")
     
     def battery_callback(self, msg):
         """电池状态话题回调函数"""
@@ -506,6 +654,35 @@ class TopicsSubscriber:
         except Exception as e:
             rospy.logerr(f"处理标记点数据时出错: {str(e)}")
     
+    def attitude_callback(self, msg):
+        """处理姿态数据，从IMU四元数转换为欧拉角"""
+        try:
+            # 从四元数转换为欧拉角
+            orientation = msg.orientation
+            quaternion = [orientation.x, orientation.y, orientation.z, orientation.w]
+            
+            # 使用tf转换库计算欧拉角
+            import tf
+            euler = tf.transformations.euler_from_quaternion(quaternion)
+            
+            # 欧拉角是按照roll, pitch, yaw的顺序
+            roll = math.degrees(euler[0])
+            pitch = math.degrees(euler[1])
+            yaw = math.degrees(euler[2])
+            
+            # 更新姿态数据
+            self.data["attitude"]["roll"] = roll
+            self.data["attitude"]["pitch"] = pitch
+            self.data["attitude"]["yaw"] = yaw
+            self.data["attitude"]["timestamp"] = rospy.Time.now().to_sec()
+            
+            # 调用注册的回调函数
+            if "attitude" in self.callbacks:
+                self.callbacks["attitude"](self.data["attitude"])
+                
+        except Exception as e:
+            rospy.logerr(f"处理姿态数据时出错: {str(e)}")
+    
     def register_callback(self, topic_name, callback):
         """注册回调函数，当话题数据更新时触发"""
         if topic_name not in self.callbacks:
@@ -517,6 +694,10 @@ class TopicsSubscriber:
         if topic_name in self.data:
             return self.data[topic_name]
         return None
+        
+    def get_latest_data(self, topic_name):
+        """获取指定话题的最新数据，与get_data相同，为了API统一性"""
+        return self.get_data(topic_name)
     
     def is_topic_active(self, topic_name):
         """检查指定话题是否活跃"""
@@ -534,3 +715,134 @@ class TopicsSubscriber:
         for topic_name, subscriber in self.subscribers.items():
             if subscriber:
                 subscriber.unregister()
+                
+    def mavros_state_callback(self, msg):
+        """处理MAVROS状态数据"""
+        try:
+            # 更新状态数据
+            self.data["mavros_state"]["connected"] = msg.connected
+            self.data["mavros_state"]["armed"] = msg.armed
+            self.data["mavros_state"]["guided"] = msg.guided
+            self.data["mavros_state"]["mode"] = msg.mode
+            
+            # 设置话题活跃状态
+            self.topics_active["mavros_state"] = True
+            
+            # 触发注册的回调函数
+            if "mavros_state" in self.callbacks:
+                for callback in self.callbacks["mavros_state"]:
+                    try:
+                        callback(self.data["mavros_state"])
+                    except Exception as e:
+                        rospy.logerr(f"执行MAVROS状态回调函数时出错: {str(e)}")
+        except Exception as e:
+            rospy.logerr(f"处理MAVROS状态数据时出错: {str(e)}")
+            
+    def mavros_gps_callback(self, msg):
+        """处理MAVROS GPS数据"""
+        try:
+            # 更新GPS数据
+            self.data["mavros_gps"]["status"] = msg.status.status
+            self.data["mavros_gps"]["latitude"] = msg.latitude
+            self.data["mavros_gps"]["longitude"] = msg.longitude
+            self.data["mavros_gps"]["altitude"] = msg.altitude
+            
+            # 设置话题活跃状态
+            self.topics_active["mavros_gps"] = True
+            
+            # 触发注册的回调函数
+            if "mavros_gps" in self.callbacks:
+                for callback in self.callbacks["mavros_gps"]:
+                    try:
+                        callback(self.data["mavros_gps"])
+                    except Exception as e:
+                        rospy.logerr(f"执行MAVROS GPS回调函数时出错: {str(e)}")
+        except Exception as e:
+            rospy.logerr(f"处理MAVROS GPS数据时出错: {str(e)}")
+    
+    def mavros_battery_callback(self, msg):
+        """处理MAVROS电池数据"""
+        try:
+            # 更新电池数据
+            self.data["mavros_battery"]["voltage"] = msg.voltage
+            self.data["mavros_battery"]["current"] = msg.current
+            self.data["mavros_battery"]["percentage"] = msg.percentage
+            self.data["mavros_battery"]["temperature"] = msg.temperature
+            
+            # 设置话题活跃状态
+            self.topics_active["mavros_battery"] = True
+            
+            # 触发注册的回调函数
+            if "mavros_battery" in self.callbacks:
+                for callback in self.callbacks["mavros_battery"]:
+                    try:
+                        callback(self.data["mavros_battery"])
+                    except Exception as e:
+                        rospy.logerr(f"执行MAVROS电池回调函数时出错: {str(e)}")
+        except Exception as e:
+            rospy.logerr(f"处理MAVROS电池数据时出错: {str(e)}")
+    
+    def mavros_altitude_callback(self, msg):
+        """处理MAVROS高度数据"""
+        try:
+            # 更新高度数据 (相对高度)
+            self.data["mavros_altitude"]["relative"] = msg.data
+            
+            # 设置话题活跃状态
+            self.topics_active["mavros_altitude"] = True
+            
+            # 触发注册的回调函数
+            if "mavros_altitude" in self.callbacks:
+                for callback in self.callbacks["mavros_altitude"]:
+                    try:
+                        callback(self.data["mavros_altitude"])
+                    except Exception as e:
+                        rospy.logerr(f"执行MAVROS高度回调函数时出错: {str(e)}")
+        except Exception as e:
+            rospy.logerr(f"处理MAVROS高度数据时出错: {str(e)}")
+    
+    def mavros_velocity_callback(self, msg):
+        """处理MAVROS速度数据"""
+        try:
+            # 更新线速度数据
+            self.data["mavros_velocity"]["linear"]["x"] = msg.twist.linear.x
+            self.data["mavros_velocity"]["linear"]["y"] = msg.twist.linear.y
+            self.data["mavros_velocity"]["linear"]["z"] = msg.twist.linear.z
+            
+            # 更新角速度数据
+            self.data["mavros_velocity"]["angular"]["x"] = msg.twist.angular.x
+            self.data["mavros_velocity"]["angular"]["y"] = msg.twist.angular.y
+            self.data["mavros_velocity"]["angular"]["z"] = msg.twist.angular.z
+            
+            # 设置话题活跃状态
+            self.topics_active["mavros_velocity"] = True
+            
+            # 触发注册的回调函数
+            if "mavros_velocity" in self.callbacks:
+                for callback in self.callbacks["mavros_velocity"]:
+                    try:
+                        callback(self.data["mavros_velocity"])
+                    except Exception as e:
+                        rospy.logerr(f"执行MAVROS速度回调函数时出错: {str(e)}")
+        except Exception as e:
+            rospy.logerr(f"处理MAVROS速度数据时出错: {str(e)}")
+    
+    def rc_input_callback(self, msg):
+        """处理RC遥控器输入数据"""
+        try:
+            # 更新RC数据
+            self.data["rc_input"]["channels"] = list(msg.channels)
+            self.data["rc_input"]["rssi"] = msg.rssi
+            
+            # 设置话题活跃状态
+            self.topics_active["rc_input"] = True
+            
+            # 触发注册的回调函数
+            if "rc_input" in self.callbacks:
+                for callback in self.callbacks["rc_input"]:
+                    try:
+                        callback(self.data["rc_input"])
+                    except Exception as e:
+                        rospy.logerr(f"执行RC输入回调函数时出错: {str(e)}")
+        except Exception as e:
+            rospy.logerr(f"处理RC输入数据时出错: {str(e)}")

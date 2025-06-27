@@ -1,6 +1,11 @@
 <RCC>
     <qresource prefix="/">
         <file>images/icons/wifi_on.png</file>
+        <file>images/icons/h.svg</file>
+        <file>images/icons/d.svg</file>
+        <file>images/icons/flitghtmode.svg</file>
+        <file>images/icons/remotecontrol.svg</file> 
+        <file>images/icons/remotecontrol.png</file> 
         <file>images/icons/takeoff.png</file>
         <file>images/icons/temp.png</file>
         <file>images/icons/tracking.png</file>
@@ -23,8 +28,10 @@
         <file>images/icons/dropright.svg</file>
         <file>images/icons/attitudebg.png</file>
         <file>images/icons/attitudebg1.png</file>
+        <file>images/icons/attitudebg2.png</file>
         <file>images/icons/attitudefg.png</file>
         <file>images/icons/attitudefg2.png</file>
+        <file>images/icons/attitudefg3.png</file>
         <file>images/icons/battery_50.png</file>
         <file>images/icons/battery_75.png</file>
         <file>images/icons/battery_full.png</file>

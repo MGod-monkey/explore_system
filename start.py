@@ -37,10 +37,11 @@ except ImportError:
     TopicsSubscriber = None
 
 try:
-    from dashboard import DashBoard
+    from dashboard import DashBoard, UIButton
 except ImportError:
     print("无法导入dashboard模块")
     DashBoard = None
+    UIButton = None
     
 try:
     from topic_logger import TopicLogger
@@ -96,6 +97,10 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         self.camera_image = None
         self.depth_image = None
         self.bird_view_image = None
+        
+        # 姿态数据
+        self.pitch = 0
+        self.roll = 0
         
         # 存储已检测到的标记点ID，避免重复添加
         self.detected_markers = set()
@@ -192,16 +197,24 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
             }
         """)
         
-        ## rviz.VisualizationFrame是RViz应用程序的主容器窗口小部件
+        # 初始化话题订阅器变量（确保此变量先被定义）
+        self.topic_subscriber = None
+        
+        # 设置RViz显示
         self.frame = rviz.VisualizationFrame()
         self.frame.setSplashPath("")
         self.frame.initialize()
-
-        ## 读取配置文件
+        
+        # 读取配置文件
         reader = rviz.YamlConfigReader()
         config = rviz.Config()
         reader.readFile(config, "my_config.rviz")
         self.frame.load(config)
+        
+        # 继续其他初始化...
+        
+        # 在所有初始化完成后设置RViz悬浮信息面板
+        self.setupRVizOverlay()
         
         # 初始化日志窗口
         self.log_window = None
@@ -214,6 +227,8 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         ## 获取VisualizationManager实例
         self.manager = self.frame.getManager()
         self.grid_display = self.manager.getRootDisplayGroup().getDisplayAt(0)
+        
+
         
         ## 创建主布局
         main_layout = QVBoxLayout(self.central_widget)
@@ -356,39 +371,59 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         status_group_layout.setContentsMargins(10, 20, 10, 10)  # 增加内边距
         status_group_layout.setSpacing(15)  # 增加组件间距
         
-        # 创建速度表盘
-        if DashBoard:
-            dashboard_container = QWidget()
-            dashboard_container.setMinimumHeight(320)  # 增加最小高度
-            dashboard_container.setMinimumWidth(320)   # 设置最小宽度
-            dashboard_container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)  # 允许扩展
-            dashboard_layout = QVBoxLayout(dashboard_container)
-            dashboard_layout.setContentsMargins(0, 0, 0, 0)
+        # 创建姿态指示器（替换原速度表盘）
+        try:
+            # 确保已正确导入AttitudeIndicator类
+            from dashboard import AttitudeIndicator
             
-            self.dashboard = DashBoard(dashboard_container)
-            dashboard_layout.addWidget(self.dashboard)
+            # 创建姿态指示器容器，保持正方形比例
+            attitude_container = QWidget()
+            attitude_container.setMinimumHeight(425)  # 适当减小最小高度
+            attitude_container.setMinimumWidth(425)   # 设置与高度相同的宽度，保持正方形比例
+            # attitude_container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)  # 允许扩展
+            attitude_container.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)  # 设置为最大高度策略
             
-            # 添加框架突出显示仪表盘
-            dashboard_frame = QFrame()
-            dashboard_frame.setFrameShape(QFrame.StyledPanel)
-            dashboard_frame.setStyleSheet("background-color: #1A202C; border-radius: 10px; border: 1px solid #3498DB;")
-            dashboard_frame_layout = QVBoxLayout(dashboard_frame)
-            dashboard_frame_layout.setContentsMargins(5, 5, 5, 5)
-            dashboard_frame_layout.addWidget(dashboard_container)
+            # # 确保姿态容器在缩放时保持正方形比例
+            attitude_container.setFixedWidth(425)  # 固定宽度
+            attitude_container.setFixedHeight(425)  # 固定高度相同以保持正方形
+            attitude_layout = QVBoxLayout(attitude_container)
+            attitude_layout.setContentsMargins(0, 0, 0, 0)
             
-            status_group_layout.addWidget(dashboard_frame, 1)  # 给仪表盘更多空间
-        else:
-            # 如果仪表盘模块不可用，显示错误信息
-            error_label = QLabel("速度表盘组件不可用")
+            # 创建姿态指示器实例
+            self.attitude_indicator = AttitudeIndicator(attitude_container)
+            attitude_layout.addWidget(self.attitude_indicator)
+            
+            # 添加框架突出显示姿态指示器
+            attitude_frame = QFrame()
+            attitude_frame.setFrameShape(QFrame.StyledPanel)
+            attitude_frame.setStyleSheet("background-color: #1A202C; border-radius: 10px; border: 1px solid #3498DB;")
+            attitude_frame_layout = QVBoxLayout(attitude_frame)
+            attitude_frame_layout.setContentsMargins(5, 5, 5, 5)  # 减小内边距让姿态指示器占用更多空间
+            attitude_frame_layout.addWidget(attitude_container)
+            attitude_frame.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)  # 设置为最大高度策略
+            
+            # 添加到无人机状态组
+            status_group_layout.addWidget(attitude_frame, 1)  # 稍微减小姿态指示器的拉伸系数
+            
+            # 设置姿态更新定时器
+            self.attitude_timer = QTimer(self)
+            self.attitude_timer.timeout.connect(self.updateAttitudeDisplay)
+            self.attitude_timer.start(50)  # 20fps更新频率
+        except Exception as e:
+            # 如果姿态指示器组件不可用，显示错误信息
+            error_label = QLabel(f"姿态指示器组件不可用: {str(e)}")
             error_label.setStyleSheet("color: red;")
             error_label.setAlignment(Qt.AlignCenter)
             status_group_layout.addWidget(error_label)
+            print(f"创建姿态指示器时出错: {str(e)}")
         
-        # 添加其他状态信息
+        # 添加其他状态信息（使用更小的间距）
         info_container = QWidget()
+        # info_container.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)  # 设置为最大高度策略
+        info_container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)  # 允许扩展
         info_layout = QGridLayout(info_container)
         info_layout.setContentsMargins(5, 5, 5, 5)
-        info_layout.setSpacing(15)  # 增加间距
+        info_layout.setSpacing(10)  # 减小间距
         
         # 添加各种状态标签
         # 增加标签字体大小
@@ -423,10 +458,10 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         self.ground_speed_label.setStyleSheet(value_style)
         info_layout.addWidget(self.ground_speed_label, 3, 1)
         
-        status_group_layout.addWidget(info_container)
+        status_group_layout.addWidget(info_container, 1)  # 使用拉伸系数1
         
         # 添加状态组到左侧边栏
-        left_sidebar_layout.addWidget(status_group)
+        left_sidebar_layout.addWidget(status_group, 2)  # 使用更大的拉伸系数
         
         # 添加功能区域组件（与状态区分离）
         function_group = QGroupBox("控制中心")
@@ -456,233 +491,220 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         function_container.setContentsMargins(5, 5, 5, 5)  # 减小内边距
         function_container.setSpacing(0)  # 减小组件间距
         
-        # 使用GridLayout进行布局，方便按钮的定位
-        function_grid = QWidget()
-        function_layout = QGridLayout(function_grid)
-        function_layout.setContentsMargins(5, 2, 5, 2)  # 减小内边距
-        function_layout.setSpacing(5)  # 减小组件间距
-        
-        # 创建上方按钮 - 一键返航
-        return_home_btn = QPushButton("一键返航")
-        return_home_btn.setCursor(Qt.PointingHandCursor)  # 设置鼠标悬停时的光标为手型
-        return_home_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #8E44AD;
-                color: white;
-                border-radius: 8px;
-                font-size: 12pt;
-                font-weight: bold;
-                padding: 8px;
-                min-height: 40px;
-                border: none;
-            }
-            QPushButton:hover {
-                background-color: #9B59B6;
-            }
-            QPushButton:pressed {
-                background-color: #7D3C98;
-            }
-        """)
-        # 添加阴影效果
-        shadow = QGraphicsDropShadowEffect()
-        shadow.setBlurRadius(10)
-        shadow.setColor(QColor(0, 0, 0, 60))
-        shadow.setOffset(2, 2)
-        return_home_btn.setGraphicsEffect(shadow)
-        
-        function_layout.addWidget(return_home_btn, 0, 1)
-        
-        # 创建左侧按钮 - 开始探索 - 文字竖向排列
-        explore_btn = QPushButton()
-        explore_btn.setCursor(Qt.PointingHandCursor)  # 设置鼠标悬停时的光标为手型
-        explore_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #27AE60;
-                color: white;
-                border-radius: 8px;
-                font-size: 12pt;
-                font-weight: bold;
-                padding: 20px 5px;
-                min-width: 40px;
-                min-height: 100px;
-                border: none;
-            }
-            QPushButton:hover {
-                background-color: #2ECC71;
-            }
-            QPushButton:pressed {
-                background-color: #229954;
-            }
-        """)
-        # 添加阴影效果
-        shadow2 = QGraphicsDropShadowEffect()
-        shadow2.setBlurRadius(10)
-        shadow2.setColor(QColor(0, 0, 0, 60))
-        shadow2.setOffset(2, 2)
-        explore_btn.setGraphicsEffect(shadow2)
-        # 创建竖向文字标签
-        explore_label = QLabel("开\n始\n探\n索")
-        explore_label.setAlignment(Qt.AlignCenter)
-        explore_label.setStyleSheet("color: white; background-color: transparent; font-size: 12pt; font-weight: bold;")
-        # 添加标签到按钮
-        explore_layout = QVBoxLayout(explore_btn)
-        explore_layout.setContentsMargins(5, 5, 5, 5)
-        explore_layout.addWidget(explore_label, 0, Qt.AlignCenter)
-        
-        # 连接开始探索按钮的点击事件
-        explore_btn.clicked.connect(self.publishNavigationGoal)
-        
-        function_layout.addWidget(explore_btn, 1, 0)
-        
-        # 创建中间按钮 - 一键启动（无背景色）
-        start_btn = QPushButton()
-        start_btn.setCursor(Qt.PointingHandCursor)  # 设置鼠标悬停时的光标为手型
-        start_btn.setStyleSheet("""
-            QPushButton {
-                background-color: transparent;
-                color: white;
-                border-radius: 50px;  /* 完全圆形 */
-                font-size: 14pt;
-                font-weight: bold;
-                min-width: 100px;
-                min-height: 100px;
-                max-width: 100px;
-                max-height: 100px;
-                border: none;  /* 无边框 */
-            }
-            QPushButton:hover {
-                background-color: rgba(39, 174, 96, 30);  /* 绿色半透明悬停效果 */
-            }
-            QPushButton:pressed {
-                background-color: rgba(39, 174, 96, 50);  /* 绿色半透明按下效果 */
-            }
-        """)
-        # 添加阴影效果
-        shadow3 = QGraphicsDropShadowEffect()
-        shadow3.setBlurRadius(15)
-        shadow3.setColor(QColor(39, 174, 96, 80))  # 使用绿色阴影
-        shadow3.setOffset(0, 0)
-        start_btn.setGraphicsEffect(shadow3)
-        
-        # 创建垂直布局来排列图标和文字
-        start_layout = QVBoxLayout(start_btn)
-        start_layout.setContentsMargins(5, 5, 5, 5)  # 减小内边距
-        start_layout.setSpacing(2)  # 减小组件间距
-        
-        # 添加图标
-        start_icon_label = QLabel()
-        # 创建一个绿色滤镜，将图标颜色转换为绿色
-        icon_pixmap = QPixmap(":/images/icons/start.svg").scaled(48, 48, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-        # 创建一个绿色滤镜效果
-        icon_painter = QPainter(icon_pixmap)
-        icon_painter.setCompositionMode(QPainter.CompositionMode_SourceIn)
-        icon_painter.fillRect(icon_pixmap.rect(), QColor("#27AE60"))  # 绿色
-        icon_painter.end()
-        
-        start_icon_label.setPixmap(icon_pixmap)
-        start_icon_label.setAlignment(Qt.AlignCenter)
-        start_layout.addWidget(start_icon_label, 0, Qt.AlignCenter)
-        
-        # 添加文字标签
-        start_text_label = QLabel("一键启动")
-        start_text_label.setStyleSheet("color: #27AE60; background-color: transparent; font-size: 14pt; font-weight: bold; border: none;")
-        start_text_label.setAlignment(Qt.AlignCenter)
-        start_layout.addWidget(start_text_label, 0, Qt.AlignCenter)
-        
-        # 连接一键启动按钮的点击事件
-        start_btn.clicked.connect(self.startDroneSystem)
-        
-        function_layout.addWidget(start_btn, 1, 1)
-        
-        # 创建右侧按钮 - 待开发 - 文字竖向排列
-        future_btn_right = QPushButton()
-        future_btn_right.setCursor(Qt.PointingHandCursor)  # 设置鼠标悬停时的光标为手型
-        future_btn_right.setStyleSheet("""
-            QPushButton {
-                background-color: #E74C3C;  /* 红色背景 */
-                color: white;
-                border-radius: 8px;
-                font-size: 12pt;
-                font-weight: bold;
-                padding: 20px 5px;
-                min-width: 40px;
-                min-height: 100px;
-                border: none;
-            }
-            QPushButton:hover {
-                background-color: #C0392B;  /* 深红色悬停效果 */
-            }
-            QPushButton:pressed {
-                background-color: #A93226;  /* 更深红色按下效果 */
-            }
-        """)
-        # 添加阴影效果
-        shadow4 = QGraphicsDropShadowEffect()
-        shadow4.setBlurRadius(10)
-        shadow4.setColor(QColor(0, 0, 0, 60))
-        shadow4.setOffset(2, 2)
-        future_btn_right.setGraphicsEffect(shadow4)
-        # 创建竖向文字标签
-        future_label = QLabel("停\n止\n程\n序")
-        future_label.setAlignment(Qt.AlignCenter)
-        future_label.setStyleSheet("color: white; background-color: transparent; font-size: 12pt; font-weight: bold;")
-        # 添加标签到按钮
-        future_layout = QVBoxLayout(future_btn_right)
-        future_layout.setContentsMargins(5, 5, 5, 5)
-        future_layout.addWidget(future_label, 0, Qt.AlignCenter)
-        
-        # 连接停止按钮的点击事件
-        future_btn_right.clicked.connect(self.stopDroneSystem)
-        
-        function_layout.addWidget(future_btn_right, 1, 2)
-        
-        # # 创建底部按钮 - 待开发
-        # future_btn_bottom = QPushButton("待开发")
-        # future_btn_bottom.setCursor(Qt.PointingHandCursor)  # 设置鼠标悬停时的光标为手型
-        # future_btn_bottom.setStyleSheet("""
-        #     QPushButton {
-        #         background-color: #7F8C8D;
-        #         color: white;
-        #         border-radius: 8px;
-        #         font-size: 12pt;
-        #         font-weight: bold;
-        #         padding: 8px;
-        #         min-height: 40px;
-        #         border: none;
-        #     }
-        #     QPushButton:hover {
-        #         background-color: #95A5A6;
-        #     }
-        #     QPushButton:pressed {
-        #         background-color: #707B7C;
-        #     }
-        # """)
-        # # 添加阴影效果
-        # shadow5 = QGraphicsDropShadowEffect()
-        # shadow5.setBlurRadius(10)
-        # shadow5.setColor(QColor(0, 0, 0, 60))
-        # shadow5.setOffset(2, 2)
-        # future_btn_bottom.setGraphicsEffect(shadow5)
-        
-        # function_layout.addWidget(future_btn_bottom, 2, 1)
-        
-        # 设置列和行的拉伸因子，使布局更合理
-        function_layout.setColumnStretch(0, 1)  # 左列
-        function_layout.setColumnStretch(1, 4)  # 中列
-        function_layout.setColumnStretch(2, 1)  # 右列
-        function_layout.setRowStretch(0, 1)     # 上行
-        function_layout.setRowStretch(1, 4)     # 中行
-        function_layout.setRowStretch(2, 1)     # 下行
-        
-        # 设置按钮之间的对齐方式和间距
-        function_layout.setAlignment(return_home_btn, Qt.AlignCenter)
-        function_layout.setAlignment(explore_btn, Qt.AlignCenter)
-        function_layout.setAlignment(start_btn, Qt.AlignCenter)
-        function_layout.setAlignment(future_btn_right, Qt.AlignCenter)
-        # function_layout.setAlignment(future_btn_bottom, Qt.AlignCenter)
-        
-        # 将网格布局添加到容器中
-        function_container.addWidget(function_grid)
+        # 创建扇形控制按钮组件
+        if UIButton:
+            self.ui_button = UIButton()
+            # 设置控件尺寸为合适的大小，保持扇形形状清晰可见
+            self.ui_button.setMinimumSize(350, 350)
+            self.ui_button.setMaximumSize(660, 660)
+            # 连接信号到对应的槽函数
+            self.ui_button.centerClicked.connect(self.startDroneSystem)  # 中间按钮 - 一键启动
+            # self.ui_button.topClicked.connect(self.onTopButtonClick)     # 顶部按钮 - 一键返航
+            self.ui_button.leftClicked.connect(self.publishNavigationGoal)  # 左侧按钮 - 开始探索
+            self.ui_button.rightClicked.connect(self.stopDroneSystem)    # 右侧按钮 - 停止程序
+            # 底部按钮暂时不连接功能
+            
+            # 添加到功能区域，居中对齐
+            function_container.addWidget(self.ui_button, 0, Qt.AlignCenter)
+        else:
+            # 如果UIButton不可用，使用原来的按钮布局
+            # 使用GridLayout进行布局，方便按钮的定位
+            function_grid = QWidget()
+            function_layout = QGridLayout(function_grid)
+            function_layout.setContentsMargins(5, 2, 5, 2)  # 减小内边距
+            function_layout.setSpacing(5)  # 减小组件间距
+            
+            # 创建上方按钮 - 一键返航
+            return_home_btn = QPushButton("一键返航")
+            return_home_btn.setCursor(Qt.PointingHandCursor)  # 设置鼠标悬停时的光标为手型
+            return_home_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #8E44AD;
+                    color: white;
+                    border-radius: 8px;
+                    font-size: 12pt;
+                    font-weight: bold;
+                    padding: 8px;
+                    min-height: 40px;
+                    border: none;
+                }
+                QPushButton:hover {
+                    background-color: #9B59B6;
+                }
+                QPushButton:pressed {
+                    background-color: #7D3C98;
+                }
+            """)
+            # 添加阴影效果
+            shadow = QGraphicsDropShadowEffect()
+            shadow.setBlurRadius(10)
+            shadow.setColor(QColor(0, 0, 0, 60))
+            shadow.setOffset(2, 2)
+            return_home_btn.setGraphicsEffect(shadow)
+            return_home_btn.clicked.connect(self.onTopButtonClick)
+            
+            function_layout.addWidget(return_home_btn, 0, 1)
+            
+            # 创建左侧按钮 - 开始探索 - 文字竖向排列
+            explore_btn = QPushButton()
+            explore_btn.setCursor(Qt.PointingHandCursor)  # 设置鼠标悬停时的光标为手型
+            explore_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #27AE60;
+                    color: white;
+                    border-radius: 8px;
+                    font-size: 12pt;
+                    font-weight: bold;
+                    padding: 20px 5px;
+                    min-width: 40px;
+                    min-height: 100px;
+                    border: none;
+                }
+                QPushButton:hover {
+                    background-color: #2ECC71;
+                }
+                QPushButton:pressed {
+                    background-color: #229954;
+                }
+            """)
+            # 添加阴影效果
+            shadow2 = QGraphicsDropShadowEffect()
+            shadow2.setBlurRadius(10)
+            shadow2.setColor(QColor(0, 0, 0, 60))
+            shadow2.setOffset(2, 2)
+            explore_btn.setGraphicsEffect(shadow2)
+            # 创建竖向文字标签
+            explore_label = QLabel("开\n始\n探\n索")
+            explore_label.setAlignment(Qt.AlignCenter)
+            explore_label.setStyleSheet("color: white; background-color: transparent; font-size: 12pt; font-weight: bold;")
+            # 添加标签到按钮
+            explore_layout = QVBoxLayout(explore_btn)
+            explore_layout.setContentsMargins(5, 5, 5, 5)
+            explore_layout.addWidget(explore_label, 0, Qt.AlignCenter)
+            
+            # 连接开始探索按钮的点击事件
+            explore_btn.clicked.connect(self.publishNavigationGoal)
+            
+            function_layout.addWidget(explore_btn, 1, 0)
+            
+            # 创建中间按钮 - 一键启动（无背景色）
+            start_btn = QPushButton()
+            start_btn.setCursor(Qt.PointingHandCursor)  # 设置鼠标悬停时的光标为手型
+            start_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: transparent;
+                    color: white;
+                    border-radius: 50px;  /* 完全圆形 */
+                    font-size: 14pt;
+                    font-weight: bold;
+                    min-width: 100px;
+                    min-height: 100px;
+                    max-width: 100px;
+                    max-height: 100px;
+                    border: none;  /* 无边框 */
+                }
+                QPushButton:hover {
+                    background-color: rgba(39, 174, 96, 30);  /* 绿色半透明悬停效果 */
+                }
+                QPushButton:pressed {
+                    background-color: rgba(39, 174, 96, 50);  /* 绿色半透明按下效果 */
+                }
+            """)
+            # 添加阴影效果
+            shadow3 = QGraphicsDropShadowEffect()
+            shadow3.setBlurRadius(15)
+            shadow3.setColor(QColor(39, 174, 96, 80))  # 使用绿色阴影
+            shadow3.setOffset(0, 0)
+            start_btn.setGraphicsEffect(shadow3)
+            
+            # 创建垂直布局来排列图标和文字
+            start_layout = QVBoxLayout(start_btn)
+            start_layout.setContentsMargins(5, 5, 5, 5)  # 减小内边距
+            start_layout.setSpacing(2)  # 减小组件间距
+            
+            # 添加图标
+            start_icon_label = QLabel()
+            # 创建一个绿色滤镜，将图标颜色转换为绿色
+            icon_pixmap = QPixmap(":/images/icons/start.svg").scaled(48, 48, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            # 创建一个绿色滤镜效果
+            icon_painter = QPainter(icon_pixmap)
+            icon_painter.setCompositionMode(QPainter.CompositionMode_SourceIn)
+            icon_painter.fillRect(icon_pixmap.rect(), QColor("#27AE60"))  # 绿色
+            icon_painter.end()
+            
+            start_icon_label.setPixmap(icon_pixmap)
+            start_icon_label.setAlignment(Qt.AlignCenter)
+            start_layout.addWidget(start_icon_label, 0, Qt.AlignCenter)
+            
+            # 添加文字标签
+            start_text_label = QLabel("一键启动")
+            start_text_label.setStyleSheet("color: #27AE60; background-color: transparent; font-size: 14pt; font-weight: bold; border: none;")
+            start_text_label.setAlignment(Qt.AlignCenter)
+            start_layout.addWidget(start_text_label, 0, Qt.AlignCenter)
+            
+            # 连接一键启动按钮的点击事件
+            start_btn.clicked.connect(self.startDroneSystem)
+            
+            function_layout.addWidget(start_btn, 1, 1)
+            
+            # 创建右侧按钮 - 停止程序 - 文字竖向排列
+            future_btn_right = QPushButton()
+            future_btn_right.setCursor(Qt.PointingHandCursor)  # 设置鼠标悬停时的光标为手型
+            future_btn_right.setStyleSheet("""
+                QPushButton {
+                    background-color: #E74C3C;  /* 红色背景 */
+                    color: white;
+                    border-radius: 8px;
+                    font-size: 12pt;
+                    font-weight: bold;
+                    padding: 20px 5px;
+                    min-width: 40px;
+                    min-height: 100px;
+                    border: none;
+                }
+                QPushButton:hover {
+                    background-color: #C0392B;  /* 深红色悬停效果 */
+                }
+                QPushButton:pressed {
+                    background-color: #A93226;  /* 更深红色按下效果 */
+                }
+            """)
+            # 添加阴影效果
+            shadow4 = QGraphicsDropShadowEffect()
+            shadow4.setBlurRadius(10)
+            shadow4.setColor(QColor(0, 0, 0, 60))
+            shadow4.setOffset(2, 2)
+            future_btn_right.setGraphicsEffect(shadow4)
+            # 创建竖向文字标签
+            future_label = QLabel("停\n止\n程\n序")
+            future_label.setAlignment(Qt.AlignCenter)
+            future_label.setStyleSheet("color: white; background-color: transparent; font-size: 12pt; font-weight: bold;")
+            # 添加标签到按钮
+            future_layout = QVBoxLayout(future_btn_right)
+            future_layout.setContentsMargins(5, 5, 5, 5)
+            future_layout.addWidget(future_label, 0, Qt.AlignCenter)
+            
+            # 连接停止按钮的点击事件
+            future_btn_right.clicked.connect(self.stopDroneSystem)
+            
+            function_layout.addWidget(future_btn_right, 1, 2)
+            
+            # 设置列和行的拉伸因子，使布局更合理
+            function_layout.setColumnStretch(0, 1)  # 左列
+            function_layout.setColumnStretch(1, 4)  # 中列
+            function_layout.setColumnStretch(2, 1)  # 右列
+            function_layout.setRowStretch(0, 1)     # 上行
+            function_layout.setRowStretch(1, 4)     # 中行
+            function_layout.setRowStretch(2, 1)     # 下行
+            
+            # 设置按钮之间的对齐方式和间距
+            function_layout.setAlignment(return_home_btn, Qt.AlignCenter)
+            function_layout.setAlignment(explore_btn, Qt.AlignCenter)
+            function_layout.setAlignment(start_btn, Qt.AlignCenter)
+            function_layout.setAlignment(future_btn_right, Qt.AlignCenter)
+            
+            # 将网格布局添加到容器中
+            function_container.addWidget(function_grid)
         
         # 添加功能区到功能组
         function_group_layout.addWidget(function_area)
@@ -1118,7 +1140,8 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         
         # 创建位置显示标签(左侧)
         self.position_label = QLabel("Position: (X:0.0000 Y:0.0000 Z:0.0000)")
-        self.position_label.setStyleSheet("color: #3498DB; padding-left: 15px;")
+        self.position_label.setStyleSheet("color: #3498DB; padding-left: 15px; font-weight: bold;")
+        self.position_label.setMinimumWidth(300)  # 设置最小宽度确保显示完整
         status_bar.addWidget(self.position_label)
         
         # 添加占位符，使FPS和时间显示在右侧
@@ -1149,10 +1172,6 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         self.speed = 0
         self.linear_speed = 0
         self.angular_speed = 0
-        self.gear = 11  # 默认挡位为11，表示N挡（空挡）
-        
-        # 初始化话题订阅器变量，但不启动订阅（将在点击一键启动后再订阅）
-        self.topic_subscriber = None
         
         # 初始状态设置为未连接
         if hasattr(self, 'connection_label'):
@@ -1300,19 +1319,7 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
             self.speed = int(speed)
             self.linear_speed = math.sqrt(linear_x**2 + linear_y**2)  # 地面速度
             
-            # 更新仪表盘显示
-            if hasattr(self, 'dashboard') and self.dashboard:
-                self.dashboard.set_speed(self.speed)
-                
-                # 根据速度方向设置挡位
-                if linear_x > 0.1:  # 前进
-                    self.gear = 10  # D挡
-                elif linear_x < -0.1:  # 后退
-                    self.gear = 13  # R挡
-                else:  # 静止
-                    self.gear = 11  # N挡
-                
-                self.dashboard.set_gear(self.gear)
+            # 不再需要更新挡位状态
             
             # 更新地面速度标签
             if hasattr(self, 'ground_speed_label'):
@@ -1491,78 +1498,30 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
             # 当没有话题订阅器时，不使用模拟数据
             return
         
-        # 如果话题订阅器存在但话题还未连接，使用模拟数据更新
+        # 如果话题订阅器存在但话题还未连接，显示等待连接状态而不是模拟数据
         if not (
             self.topic_subscriber.is_topic_active("battery") or 
             self.topic_subscriber.is_topic_active("odometry") or
             self.topic_subscriber.is_topic_active("velocity") or
             self.topic_subscriber.is_topic_active("status") or
-            self.topic_subscriber.is_topic_active("camera")
+            self.topic_subscriber.is_topic_active("camera") or
+            self.topic_subscriber.is_topic_active("attitude")
         ):
-            # 模拟电池电量波动（仅用于测试）
-            battery_percentage = self.battery_percentage + (random.uniform(-0.5, 0.3) if hasattr(random, 'uniform') else 0)
-            # 确保百分比在合理范围内
-            self.battery_percentage = max(0, min(100, battery_percentage))
+            # 显示等待连接状态
+            if hasattr(self, 'battery_icon_label'):
+                self.battery_icon_label.setPixmap(QPixmap(":/images/icons/battery_100.svg").scaled(24, 24, Qt.KeepAspectRatio, Qt.SmoothTransformation))
             
-            # 根据百分比模拟电压变化 - 与真实电池放电曲线类似
-            # 12.6V (满电) -> 11.7V (空电)
-            self.battery_voltage = 11.7 + (self.battery_percentage / 100.0) * 0.9
-            self.voltage_label.setText(f"{self.battery_voltage:.2f} V")
+            if hasattr(self, 'voltage_label'):
+                self.voltage_label.setText("-- V")
             
-            # 根据电量选择对应图标
-            if self.battery_percentage <= 15:
-                icon_path = ":/images/icons/battery_0.svg"
-            elif self.battery_percentage <= 50:
-                icon_path = ":/images/icons/battery_50.svg"
-            elif self.battery_percentage <= 75:
-                icon_path = ":/images/icons/battery_75.svg"
-            else:
-                icon_path = ":/images/icons/battery_100.svg"
-                
-            # 更新电池图标
-            self.battery_icon_label.setPixmap(QPixmap(icon_path).scaled(24, 24, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            if hasattr(self, 'position_label'):
+                self.position_label.setText("Position: (等待无人机连接)")
             
-            # 模拟位置变化
-            current_time = time.time()
-            # 使用正弦和余弦函数生成圆形轨迹，加上一些小的随机波动
-            pos_x = 10.0 * math.cos(current_time * 0.1) + random.uniform(-0.05, 0.05)
-            pos_y = 10.0 * math.sin(current_time * 0.1) + random.uniform(-0.05, 0.05)
-            pos_z = 2.0 + math.sin(current_time * 0.2) * 0.5 + random.uniform(-0.02, 0.02)
-            
-            # 更新位置显示
-            self.position_label.setText(f"Position: (X:{pos_x:.4f} Y:{pos_y:.4f} Z:{pos_z:.4f})")
-            
-            # 更新高度显示
             if hasattr(self, 'altitude_label'):
-                self.altitude_label.setText(f"{pos_z:.4f} m")
-            
-            # 模拟速度变化
-            # 计算速度(与位置变化对应)
-            speed_x = -10.0 * math.sin(current_time * 0.1) * 0.1  # dx/dt
-            speed_y = 10.0 * math.cos(current_time * 0.1) * 0.1   # dy/dt
-            speed_z = math.cos(current_time * 0.2) * 0.5 * 0.2    # dz/dt
-            
-            # 计算线速度和合成速度
-            linear_speed = math.sqrt(speed_x**2 + speed_y**2)
-            speed = math.sqrt(speed_x**2 + speed_y**2 + speed_z**2) * 100  # 转换为厘米/秒
-            
-            # 更新速度显示
-            if hasattr(self, 'dashboard') and self.dashboard:
-                self.dashboard.set_speed(int(speed))
+                self.altitude_label.setText("-- m")
                 
-                # 根据速度方向设置挡位
-                if speed_x > 0.01:  # 前进
-                    self.gear = 10  # D挡
-                elif speed_x < -0.01:  # 后退
-                    self.gear = 13  # R挡
-                else:  # 静止
-                    self.gear = 11  # N挡
-                
-                self.dashboard.set_gear(self.gear)
-            
-            # 更新地面速度标签
             if hasattr(self, 'ground_speed_label'):
-                self.ground_speed_label.setText(f"{linear_speed:.4f} m/s")
+                self.ground_speed_label.setText("-- m/s")
             
             # 当没有/mavros/state话题连接时，显示为未连接状态
             if hasattr(self, 'connection_label'):
@@ -1730,6 +1689,26 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         except Exception as e:
             print(f"切换RViz显示面板时出错: {str(e)}")
 
+    def updateAttitudeDisplay(self):
+        """更新姿态指示器显示"""
+        try:
+            if hasattr(self, 'attitude_indicator'):
+                # 从话题数据中获取姿态信息，如果没有则模拟生成
+                if self.topic_subscriber and self.topic_subscriber.is_topic_active("attitude"):
+                    # 如果有真实姿态数据，使用真实数据
+                    attitude_data = self.topic_subscriber.get_latest_data("attitude")
+                    if attitude_data:
+                        self.pitch = attitude_data.get("pitch", 0)  # 俯仰角
+                        self.roll = attitude_data.get("roll", 0)    # 滚转角
+                        self.attitude_indicator.update_attitude(self.pitch, self.roll)
+                else:
+                    # 没有实际姿态数据时，将姿态指示器设置为零位
+                    self.pitch = 0
+                    self.roll = 0
+                    self.attitude_indicator.update_attitude(self.pitch, self.roll)
+        except Exception as e:
+            print(f"更新姿态指示器时出错: {str(e)}")
+            
     def toggleLogWindow(self):
         """显示或隐藏日志窗口"""
         try:
@@ -2007,8 +1986,7 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
                 self.topic_subscriber.shutdown()
                 self.topic_subscriber = None
             
-            # 在启动订阅器前，检查摄像头设备状态
-            self.checkCameraDevices()
+
                 
             # 创建新的订阅器
             self.topic_subscriber = TopicsSubscriber()
@@ -2022,6 +2000,10 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
             self.topic_subscriber.register_callback("depth", self.updateDepthImage)
             self.topic_subscriber.register_callback("bird_view", self.updateBirdViewImage)
             self.topic_subscriber.register_callback("marker", self.marker_callback)
+            self.topic_subscriber.register_callback("attitude", self.updateAttitudeDisplay)
+            
+            # 添加MAVROS话题回调 - 只保留状态话题，其他与普通话题重复
+            self.topic_subscriber.register_callback("mavros_state", self.updateStatusDisplay)
             
             print("话题订阅器已启动，将在后台自动连接可用话题...")
             return True
@@ -2030,66 +2012,7 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
             self.topic_subscriber = None
             return False
             
-    def checkCameraDevices(self):
-        """检查摄像头设备状态，尝试释放被占用的设备"""
-        try:
-            print("检查摄像头设备状态...")
-            
-            # 检查是否有与RealSense相关的进程仍在运行
-            try:
-                # 使用ps命令查找可能的相机相关进程
-                ps_process = subprocess.run(
-                    "ps aux | grep -E 'realsense|camera_node' | grep -v grep",
-                    shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True
-                )
-                
-                # 如果找到相关进程
-                if ps_process.stdout.strip():
-                    print("检测到可能的相机进程仍在运行:")
-                    print(ps_process.stdout)
-                    
-                    # 尝试使用killall关闭常见的相机进程名称
-                    for process_name in ['realsense-viewer', 'rs-enumerate-devices', 'rs-depth', 'camera_node', 'rs_camera']:
-                        try:
-                            subprocess.run(['killall', '-9', process_name], stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=2)
-                        except Exception:
-                            pass
-            except Exception as e:
-                print(f"检查相机进程时出错: {str(e)}")
-            
-            # 检查视频设备是否被占用
-            device_busy = False
-            for i in range(10):  # 检查常见的视频设备
-                device = f"/dev/video{i}"
-                if os.path.exists(device):
-                    try:
-                        # 检查设备是否被占用
-                        fuser_process = subprocess.run(['fuser', device], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=2)
-                        if fuser_process.stdout.strip():
-                            print(f"设备 {device} 被占用，尝试释放...")
-                            device_busy = True
-                            
-                            # 尝试释放设备
-                            kill_process = subprocess.run(['fuser', '-k', device], stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=3)
-                            if kill_process.returncode == 0:
-                                print(f"成功释放设备 {device}")
-                            else:
-                                print(f"释放设备 {device} 失败")
-                                
-                            # 等待设备释放
-                            time.sleep(0.5)
-                    except Exception as e:
-                        print(f"检查设备 {device} 时出错: {str(e)}")
-            
-            # 如果发现设备被占用，等待一段时间让设备完全释放
-            if device_busy:
-                print("等待设备资源完全释放...")
-                time.sleep(2)
-                
-            return True
-        except Exception as e:
-            print(f"检查摄像头设备状态时出错: {str(e)}")
-            return False
+
 
     def showOdomLog(self):
         """显示odom话题的日志"""
@@ -2368,8 +2291,7 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
             time.sleep(1)  # 短暂延迟
             progress_dialog.close()
             
-            # 在启动系统前先尝试重置深度相机设备
-            QTimer.singleShot(3000, self.resetCameraDevices)  # 先重置相机
+
             # 话题订阅器已在程序启动时初始化，这里不需要再次调用
             
             # 显示成功消息和日志文件位置
@@ -2892,8 +2814,8 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
             
             # 设置单元格值
             self.position_table.setItem(row_position, 0, QTableWidgetItem(str(ball_id)))
-            self.position_table.setItem(row_position, 1, QTableWidgetItem(f"{x:.2f}"))
-            self.position_table.setItem(row_position, 2, QTableWidgetItem(f"{y:.2f}"))
+            self.position_table.setItem(row_position, 1, QTableWidgetItem(f"{x:.2f m}"))
+            self.position_table.setItem(row_position, 2, QTableWidgetItem(f"{y:.2f m}"))
             
             # 设置状态为"待确认"
             status_item = QTableWidgetItem("待确认")
@@ -2950,53 +2872,9 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
                 progress_dialog.setValue(30)
                 QApplication.processEvents()
             
-            # 先尝试手动关闭深度相机相关节点
-            progress_dialog.setLabelText("正在关闭深度相机节点...")
-            progress_dialog.setValue(35)
-            QApplication.processEvents()
-            
-            # 专门处理深度相机节点
-            try:
-                # 使用rosnode list查找所有节点
-                nodes_process = subprocess.run(['rosnode', 'list'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=5)
-                if nodes_process.returncode == 0:
-                    # 获取节点列表
-                    nodes = nodes_process.stdout.strip().split('\n')
-                    # 筛选可能与深度相机相关的节点
-                    camera_nodes = [node for node in nodes if any(x in node for x in ['camera', 'realsense', 'depth', 'rgbd', 'rs_'])]
-                    
-                    for node in camera_nodes:
-                        print(f"正在关闭相机节点: {node}")
-                        kill_process = subprocess.run(['rosnode', 'kill', node], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=3)
-                        if kill_process.returncode == 0:
-                            print(f"成功关闭节点: {node}")
-                        else:
-                            print(f"关闭节点失败: {node}, 错误: {kill_process.stderr}")
-            except Exception as e:
-                print(f"手动关闭相机节点时出错: {str(e)}")
-
-            # 使用fuser命令释放摄像头设备
-            progress_dialog.setLabelText("正在释放相机设备资源...")
+            # 进度条继续
             progress_dialog.setValue(38)
             QApplication.processEvents()
-            
-            try:
-                # 查找并释放可能被占用的视频设备
-                for i in range(10):  # 检查/dev/video0至video9
-                    device = f"/dev/video{i}"
-                    if os.path.exists(device):
-                        try:
-                            # 查找使用该设备的进程
-                            fuser_process = subprocess.run(['fuser', device], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=2)
-                            if fuser_process.stdout.strip():
-                                print(f"正在释放设备: {device}")
-                                # 使用fuser -k终止使用该设备的进程
-                                kill_process = subprocess.run(['fuser', '-k', device], stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=2)
-                                print(f"设备{device}释放状态: {kill_process.returncode}")
-                        except Exception as e:
-                            print(f"释放设备{device}时出错: {str(e)}")
-            except Exception as e:
-                print(f"处理相机设备资源时出错: {str(e)}")
 
             # 使用已存在的停止脚本
             script_path = "/home/togan/zyc_fuel_ws/scripts/stop.sh"
@@ -3222,90 +3100,307 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         except Exception as e:
             QMessageBox.critical(self, "发布错误", f"发布导航目标点时出错: {str(e)}")
 
-    def resetCameraDevices(self):
-        """重置深度相机设备，确保RealSense相机可以正常运行"""
-        try:
-            print("正在重置深度相机设备...")
+
+
+    def setupRVizOverlay(self):
+        """创建悬浮在RViz上方的信息面板 - 仅图标+值"""
+        # 创建悬浮面板容器 - 指定父组件，使其显示在RViz框架上
+        self.rviz_overlay = QWidget()
+        self.rviz_overlay.setObjectName("rvizOverlay")
+        
+        # 设置窗口无边框、始终置顶
+        self.rviz_overlay.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
+        # # 设置窗口背景透明
+        self.rviz_overlay.setAttribute(Qt.WA_TranslucentBackground)
+        
+        # 使用浅黑色背景，30%不透明度，添加较大圆角
+        self.rviz_overlay.setStyleSheet("""
+            QWidget#rvizOverlay {
+                background-color: rgba(26, 32, 44, 0.3);  /* 30%不透明度浅黑色 */
+                border-radius: 15px;  /* 较大的圆角 */
+            }
+            QLabel {
+                color: white;
+                font-size: 12pt;
+                background-color: transparent;
+                padding: 2px;
+            }
+            QLabel.value {
+                color: #3498DB;  /* 蓝色值 */
+                font-weight: bold;
+            }
+        """)
+        
+        # 创建水平布局
+        overlay_layout = QHBoxLayout(self.rviz_overlay)
+        overlay_layout.setContentsMargins(15, 6, 15, 6)
+        overlay_layout.setSpacing(10)  # 增加间距
+        
+        # 定义要显示的信息项和对应图标
+        info_items = [
+            {"icon": ":/images/icons/flitghtmode.svg", "value_id": "mode_value"},
+            {"icon": ":/images/icons/remotecontrol.svg", "value_id": "rc_value"}, 
+            {"icon": ":/images/icons/h.svg", "value_id": "altitude_value", "unit": "m"},
+            {"icon": ":/images/icons/d.svg", "value_id": "speed_value", "unit": "m/s"},
+            {"icon": ":/images/icons/voltage.svg", "value_id": "voltage_value", "unit": "V"}, 
+            {"icon": ":/images/icons/battery_100.svg", "value_id": "battery_value", "unit": "%"}
+        ]
+        
+        # 创建图标和标签
+        for i, item in enumerate(info_items):
+            # 如果不是第一项，添加小间距，但不添加分隔线（保持透明效果）
+            if i > 0:
+                spacer = QSpacerItem(5, 10, QSizePolicy.Fixed, QSizePolicy.Minimum)
+                overlay_layout.addItem(spacer)
             
-            # 第一步：确保没有相关进程在运行
-            self.checkCameraDevices()
+            # 创建一个水平布局的容器来放置图标和值
+            item_container = QWidget()
+            item_layout = QHBoxLayout(item_container)
+            item_layout.setContentsMargins(0, 0, 0, 0)
+            item_layout.setSpacing(5)
             
-            # 第二步：尝试重新加载内核模块(需要sudo权限，可能不适用于所有情况)
-            try:
-                # 查看是否有与UVC相关的内核模块
-                lsmod_process = subprocess.run(
-                    "lsmod | grep uvc",
-                    shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=3
-                )
+            # 图标
+            icon_label = QLabel()
+            icon_pixmap = QPixmap(item["icon"]).scaled(22, 22, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            icon_label.setPixmap(icon_pixmap)
+            icon_label.setAlignment(Qt.AlignCenter)
+            item_layout.addWidget(icon_label)
+            
+            # 值标签
+            value_label = QLabel("--")
+            value_label.setProperty("class", "value")
+            setattr(self, item["value_id"], value_label)
+            item_layout.addWidget(value_label)
+            
+            # 单位 - 减小与值的间距
+            if "unit" in item and item["unit"]:
+                unit_label = QLabel(item["unit"])
+                unit_label.setContentsMargins(0, 0, 0, 0)  # 移除内边距
+                item_layout.setSpacing(2)  # 减小间距
+                item_layout.addWidget(unit_label)
+            
+            overlay_layout.addWidget(item_container)
+        
+        # 设置固定高度，宽度为RViz宽度的80%
+        self.rviz_overlay.setFixedHeight(40)
+        
+        # 定位函数 - 居中于RViz上方
+        def updateOverlayPosition():
+            frame_size = self.frame.size()
+            frame_pos = self.frame.mapToGlobal(QPoint(0, 0))
+            new_width = int(frame_size.width() * 0.8)
+            self.rviz_overlay.setFixedWidth(new_width)
+            
+            # 计算相对于屏幕的全局位置
+            x_pos = frame_pos.x() + (frame_size.width() - new_width) // 2
+            y_pos = frame_pos.y() + 20
+            self.rviz_overlay.move(x_pos, y_pos)
+        
+        # 创建resize事件处理函数
+        def frame_resize_event(event):
+            QFrame.resizeEvent(self.frame, event)
+            updateOverlayPosition()
+            return None
+            
+        self.frame.resizeEvent = frame_resize_event
+        
+        # 创建move事件处理函数
+        def main_window_move_event(event):
+            QMainWindow.moveEvent(self, event)
+            updateOverlayPosition()
+            return None
+            
+        self.moveEvent = main_window_move_event
+        
+        # 显示悬浮窗口
+        self.rviz_overlay.show()
+        
+        # 初始位置更新
+        updateOverlayPosition()
+        
+        # 更新数据的定时器
+        self.data_update_timer = QTimer(self)
+        self.data_update_timer.timeout.connect(self.updateOverlayData)
+        self.data_update_timer.start(300)  # 降低更新频率到300ms
+        
+        # 在主窗口关闭事件中关闭悬浮窗口
+        old_close_event = self.closeEvent if hasattr(self, 'closeEvent') else None
+        
+        def new_close_event(event):
+            # 关闭悬浮窗口
+            if hasattr(self, 'rviz_overlay') and self.rviz_overlay:
+                self.rviz_overlay.close()
                 
-                if lsmod_process.stdout.strip():
-                    print("检测到UVC摄像头模块加载，尝试重置USB设备...")
-                    
-                    # 查找RealSense摄像头USB设备
-                    usb_devices = subprocess.run(
-                        "lsusb | grep -i 'intel' | grep -i 'RealSense'",
-                        shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=3
-                    )
-                    
-                    if usb_devices.stdout.strip():
-                        print("找到RealSense设备:")
-                        print(usb_devices.stdout)
-                        
-                        # 这里不尝试重新加载内核模块，因为需要root权限
-                        # 但我们可以尝试使用libusb重置USB设备(如果系统允许)
-                        try:
-                            # 找出RealSense设备的总线和设备ID
-                            lines = usb_devices.stdout.strip().split('\n')
-                            for line in lines:
-                                parts = line.split()
-                                if len(parts) >= 6:
-                                    bus_device = parts[1].split(':')
-                                    if len(bus_device) == 2:
-                                        bus = bus_device[0]
-                                        device = bus_device[1]
-                                        
-                                        # 尝试使用usbreset重置这个设备
-                                        print(f"尝试重置USB设备: Bus {bus} Device {device}")
-                                        
-                                        # 这里只打印命令，实际执行需要root权限
-                                        print(f"sudo usbreset /dev/bus/usb/{bus}/{device}")
-                        except Exception as e:
-                            print(f"解析USB设备信息时出错: {str(e)}")
-            except Exception as e:
-                print(f"检查内核模块时出错: {str(e)}")
-            
-            # 第三步：使用udevadm触发设备重新检测
+            # 静默关闭后台程序（不显示任何对话框）
             try:
-                subprocess.run(['udevadm', 'trigger'], stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5)
-                time.sleep(1)
+                self.silentStopDroneSystem()
             except Exception as e:
-                print(f"触发udev规则时出错: {str(e)}")
-            
-            # 第四步：重新检查设备是否可用
-            time.sleep(1)  # 等待设备重置
-            
-            # 检查视频设备是否可用
-            available_devices = []
-            for i in range(10):
-                device = f"/dev/video{i}"
-                if os.path.exists(device):
-                    try:
-                        # 检查设备是否被占用
-                        fuser_process = subprocess.run(['fuser', device], stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=2)
-                        if not fuser_process.stdout.strip():
-                            available_devices.append(device)
-                    except Exception:
-                        pass
-            
-            if available_devices:
-                print(f"可用的视频设备: {', '.join(available_devices)}")
-                return True
+                print(f"静默关闭程序时出错: {str(e)}")
+                
+            # 调用原来的关闭事件处理函数
+            if old_close_event:
+                old_close_event(event)
             else:
-                print("没有找到可用的视频设备")
-                return False
+                event.accept()
+                
+        self.closeEvent = new_close_event
+
+    def updateOverlayData(self):
+        """更新信息条数据"""
+        if not all(hasattr(self, attr) for attr in ['mode_value', 'altitude_value', 'speed_value', 'battery_value', 'voltage_value', 'rc_value']):
+            return  # 确保UI已初始化
+        
+        try:
+            # 更新模式
+            if hasattr(self, 'mode_label'):
+                mode_text = self.mode_label.text().split(" ")[0] if " " in self.mode_label.text() else self.mode_label.text()
+                self.mode_value.setText(mode_text)
+            
+            # 更新高度
+            if hasattr(self, 'altitude_label'):
+                # 从格式为"0.0000 m"的文本中提取数值部分
+                height_text = self.altitude_label.text()
+                if ' ' in height_text:
+                    height_value = height_text.split(' ')[0]
+                    # 格式化为最多2位小数
+                    try:
+                        height_value = f"{float(height_value):.2f}"
+                    except:
+                        pass
+                    self.altitude_value.setText(height_value)
+                else:
+                    self.altitude_value.setText(height_text)
+            
+            # 更新速度
+            if hasattr(self, 'ground_speed_label'):
+                # 从格式为"0.0000 m/s"的文本中提取数值部分
+                speed_text = self.ground_speed_label.text()
+                if ' ' in speed_text:
+                    speed_value = speed_text.split(' ')[0]
+                    # 格式化为最多2位小数
+                    try:
+                        speed_value = f"{float(speed_value):.2f}"
+                    except:
+                        pass
+                    self.speed_value.setText(speed_value)
+                else:
+                    self.speed_value.setText(speed_text)
+            
+            # 更新电池电量
+            if hasattr(self, 'battery_percentage'):
+                battery = f"{self.battery_percentage:.1f}" if isinstance(self.battery_percentage, (int, float)) else "--"
+                self.battery_value.setText(battery)
+                
+                # 根据电量更新电池图标
+                battery_value = float(battery) if battery != "--" else 100
+                if battery_value <= 15:
+                    icon_path = ":/images/icons/battery_0.svg"
+                elif battery_value <= 50:
+                    icon_path = ":/images/icons/battery_50.svg"
+                elif battery_value <= 75:
+                    icon_path = ":/images/icons/battery_75.svg"
+                else:
+                    icon_path = ":/images/icons/battery_100.svg"
+                    
+                # 找到电池图标并更新 - 使用简单方法
+                for widget in self.rviz_overlay.findChildren(QLabel):
+                    pixmap = widget.pixmap()
+                    if pixmap and pixmap.width() == 22 and pixmap.height() == 22:
+                        # 检查是否为电池图标（近似判断）
+                        if "battery" in widget.objectName() or "battery" in str(widget.property("icon_type")):
+                            widget.setPixmap(QPixmap(icon_path).scaled(22, 22, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+                            break
+            
+            # 更新电压
+            if hasattr(self, 'battery_voltage'):
+                voltage = f"{self.battery_voltage:.2f}" if isinstance(self.battery_voltage, (int, float)) else "--"
+                self.voltage_value.setText(voltage)
+            
+            # 更新遥控器连接状态
+            if hasattr(self, 'topic_subscriber') and self.topic_subscriber:
+                # 检查遥控器话题是否活跃
+                rc_active = self.topic_subscriber.is_topic_active('rc_input')
+                # 检查最新数据
+                rc_data = self.topic_subscriber.get_latest_data('rc_input')
+                
+                # 确定连接状态
+                if rc_active and rc_data and 'channels' in rc_data and len(rc_data['channels']) > 0:
+                    self.rc_value.setText("已连接")
+                    self.rc_value.setStyleSheet("color: #2ECC71; font-weight: bold;")  # 绿色表示已连接
+                else:
+                    self.rc_value.setText("未连接")
+                    self.rc_value.setStyleSheet("color: #E74C3C; font-weight: bold;")  # 红色表示未连接
+                
         except Exception as e:
-            print(f"重置摄像头设备时出错: {str(e)}")
-            return False
+            print(f"更新信息面板数据时出错: {str(e)}")
+
+    def silentStopDroneSystem(self):
+        """静默关闭无人机系统，不显示任何对话框"""
+        try:
+            # 立即停止所有进程监控定时器，避免重复弹出错误消息
+            for timer_attr in ['check_process_timer', 'check_process2_timer', 'check_process3_timer']:
+                if hasattr(self, timer_attr):
+                    timer = getattr(self, timer_attr)
+                    if timer and timer.isActive():
+                        timer.stop()
+                        print(f"已停止{timer_attr}")
+            
+            # 如果有任何话题订阅器在运行，先关闭它
+            if self.topic_subscriber:
+                try:
+                    self.topic_subscriber.shutdown()
+                    self.topic_subscriber = None
+                    print("已关闭话题订阅器")
+                except Exception as e:
+                    print(f"关闭话题订阅器时出错: {str(e)}")
+            
+
+
+            # 使用已存在的停止脚本
+            script_path = "/home/togan/zyc_fuel_ws/scripts/stop.sh"
+            
+            # 检查脚本是否存在
+            if os.path.exists(script_path):
+                try:
+                    # 修改环境变量，通知脚本保留roscore运行
+                    env = os.environ.copy()
+                    env["PRESERVE_ROSCORE"] = "1"  # 设置环境变量，告知脚本保留roscore
+                    
+                    # 静默执行脚本
+                    subprocess.Popen(['bash', script_path], 
+                                  stdout=subprocess.PIPE, 
+                                  stderr=subprocess.PIPE,
+                                  env=env)   # 传递修改后的环境变量
+                    
+                    print("已启动静默终止进程")
+                except Exception as e:
+                    print(f"执行停止脚本时出错: {str(e)}")
+            else:
+                print(f"未找到停止脚本: {script_path}")
+                
+                # 如果找不到脚本，直接尝试终止常见的ROS节点
+                try:
+                    # 获取所有节点列表
+                    nodes_process = subprocess.run(['rosnode', 'list'], 
+                                                stdout=subprocess.PIPE, 
+                                                stderr=subprocess.PIPE, 
+                                                text=True, 
+                                                timeout=5)
+                    
+                    if nodes_process.returncode == 0:
+                        nodes = nodes_process.stdout.strip().split('\n')
+                        # 过滤掉rosout和myviz节点（自身）
+                        nodes_to_kill = [node for node in nodes if node != '/rosout' and 'myviz' not in node]
+                        
+                        if nodes_to_kill:
+                            kill_cmd = ['rosnode', 'kill'] + nodes_to_kill
+                            subprocess.run(kill_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5)
+                            print(f"已尝试终止 {len(nodes_to_kill)} 个ROS节点")
+                except Exception as e:
+                    print(f"手动终止ROS节点时出错: {str(e)}")
+                
+        except Exception as e:
+            print(f"静默停止无人机系统时出错: {str(e)}")
 
 ## Start the Application
 ## ^^^^^^^^^^^^^^^^^^^^^
@@ -3352,37 +3447,9 @@ def check_and_start_roscore():
         print(f"检查或启动roscore时出错: {str(e)}")
         return False
 
-def set_serial_permissions():
-    """设置串口设备权限"""
-    try:
-        import subprocess
-        
-        print("正在设置串口设备权限...")
-        # 执行sudo命令修改/dev/ttyACM0的权限，通过管道提供密码
-        process = subprocess.Popen(
-            ['sudo', '-S', 'chmod', '777', '/dev/ttyACM0'], 
-            stdin=subprocess.PIPE,
-            stdout=subprocess.PIPE, 
-            stderr=subprocess.PIPE,
-            universal_newlines=True
-        )
-        
-        # 提供管理员密码
-        stdout, stderr = process.communicate(input="1\n")
-        
-        if process.returncode == 0:
-            print("串口设备权限设置成功")
-            return True
-        else:
-            print(f"设置串口设备权限失败，错误信息: {stderr}")
-            return False
-    except Exception as e:
-        print(f"设置串口设备权限时出错: {str(e)}")
-        return False
+
 
 if __name__ == '__main__':
-    # 设置串口权限
-    set_serial_permissions()
     
     app = QApplication(sys.argv)
     
