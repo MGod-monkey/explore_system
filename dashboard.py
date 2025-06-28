@@ -816,3 +816,208 @@ class UIButton(QWidget):
 
         if self.leftBtnView and self.leftBtnView.contains(clickPoint):
             self.leftClicked.emit() 
+
+
+class AttitudeIndicatorWidget(QWidget):
+    """姿态指示器窗口组件，显示飞行器俯仰和滚转角度"""
+    
+    def __init__(self, parent=None):
+        # 创建一个独立窗口，但指定父窗口
+        super(AttitudeIndicatorWidget, self).__init__(None)
+        
+        # 保存父窗口引用
+        self.parent_widget = parent
+        
+        # 设置窗口标志，使其作为工具窗口、无边框
+        self.setWindowFlags(Qt.Tool | Qt.FramelessWindowHint)
+        
+        # 设置背景透明
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        
+        # 姿态参数
+        self.pitch = 0  # 俯仰角，单位：度
+        self.roll = 0   # 滚转角，单位：度
+        
+        # 设置组件大小，与指南针一致
+        self.size = 180
+        self.setFixedSize(self.size, self.size)
+        
+        # 加载姿态仪背景和前景图像
+        self.bg_image = QPixmap(":/images/icons/attitudebg1.png")
+        self.fg_image = QPixmap(":/images/icons/attitudefg2.png")
+    
+    def update_attitude(self, pitch, roll):
+        """更新俯仰和滚转角度"""
+        self.pitch = pitch
+        self.roll = roll
+        self.update()
+    
+    def pitch_to_pixels(self, pitch):
+        # 线性映射: -90..90俯仰角度映射到-75..75像素
+        pixels_range = 75
+        return pitch * pixels_range / 90.0
+    
+    def paintEvent(self, event):
+        """绘制姿态指示器"""
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setRenderHint(QPainter.SmoothPixmapTransform)
+        
+        # 清除整个区域确保透明度
+        painter.setCompositionMode(QPainter.CompositionMode_Clear)
+        painter.fillRect(self.rect(), Qt.transparent)
+        painter.setCompositionMode(QPainter.CompositionMode_SourceOver)
+        
+        # 绘制半透明背景
+        center_x = self.size / 2
+        center_y = self.size / 2
+        radius = self.size / 2  # 使用完整半径填满窗口
+        
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QBrush(QColor(26, 32, 44, 160)))  # 半透明背景色
+        painter.drawEllipse(QPointF(center_x, center_y), radius, radius)
+        
+        # 保存当前状态
+        painter.save()
+        
+        # 限制绘制区域为圆形
+        painter.setClipRegion(QRegion(0, 0, self.size, self.size, QRegion.Ellipse))
+        
+        # 移动到中心
+        painter.translate(center_x, center_y)
+        
+        # 根据滚转角度旋转
+        painter.rotate(self.roll)
+        
+        # 计算俯仰偏移
+        pitch_pixels = self.pitch_to_pixels(self.pitch)
+        
+        # 绘制背景图 - 根据俯仰角上下移动
+        if not self.bg_image.isNull():
+            # 缩放图像填满整个窗口
+            bg_size = int(self.size * 4.5)  # 大幅放大以确保图像充分显示
+            scaled_bg = self.bg_image.scaled(bg_size, bg_size, 
+                                       Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            
+            # 根据俯仰角移动背景（地平线效果）
+            painter.drawPixmap(
+                -scaled_bg.width() / 2, 
+                -scaled_bg.height() / 2 + pitch_pixels,
+                scaled_bg
+            )
+        
+        # 恢复旋转前状态，用于绘制固定的前景层
+        painter.restore()
+        
+        # 绘制前景图（固定在中心）- 填满整个窗口
+        if not self.fg_image.isNull():
+            fg_size = self.size  # 使前景图与窗口大小一致
+            scaled_fg = self.fg_image.scaled(fg_size, fg_size, 
+                                       Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            
+            # 居中显示前景图
+            x_offset = (self.size - scaled_fg.width()) / 2
+            y_offset = (self.size - scaled_fg.height()) / 2
+            painter.drawPixmap(x_offset, y_offset, scaled_fg)
+    
+    def sizeHint(self):
+        return QSize(self.size, self.size)
+
+
+class CompassWidget(QWidget):
+    """圆形指南针组件，显示无人机朝向"""
+    
+    def __init__(self, parent=None):
+        # 创建一个独立窗口，但指定父窗口
+        super(CompassWidget, self).__init__(None)
+        
+        # 保存父窗口引用
+        self.parent_widget = parent
+        
+        # 设置窗口标志，使其作为工具窗口、无边框
+        self.setWindowFlags(Qt.Tool | Qt.FramelessWindowHint)
+        
+        # 设置背景透明
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        
+        # 初始朝向角度
+        self.heading = 0
+        
+        # 加载指南针背景和指针图像
+        self.compass_bg = QPixmap(":/images/icons/compassbg.png")
+        self.needle = QPixmap(":/images/icons/needle.png")
+        
+        # 设置圆形大小，增大尺寸
+        self.size = 180
+        self.setFixedSize(self.size, self.size)
+    
+    def set_heading(self, heading):
+        """更新指南针朝向角度"""
+        self.heading = heading
+        self.update()
+    
+    def paintEvent(self, event):
+        """绘制指南针"""
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setRenderHint(QPainter.SmoothPixmapTransform)
+        
+        # 清除整个区域确保透明度
+        painter.setCompositionMode(QPainter.CompositionMode_Clear)
+        painter.fillRect(self.rect(), Qt.transparent)
+        painter.setCompositionMode(QPainter.CompositionMode_SourceOver)
+        
+        # 绘制半透明背景 - 确保圆形正好在窗口内
+        center_x = self.size / 2
+        center_y = self.size / 2
+        radius = (self.size - 10) / 2  # 留出一些边距
+        
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QBrush(QColor(26, 32, 44, 160)))  # 半透明背景色
+        painter.drawEllipse(QPointF(center_x, center_y), radius, radius)
+        
+        # 绘制指南针背景 - 确保居中
+        if not self.compass_bg.isNull():
+            # 缩放背景图到合适大小
+            bg_size = int(self.size * 0.9)  # 稍小于窗口尺寸
+            scaled_bg = self.compass_bg.scaled(bg_size, bg_size, 
+                                           Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            
+            # 计算居中位置
+            x_offset = (self.size - scaled_bg.width()) / 2
+            y_offset = (self.size - scaled_bg.height()) / 2
+            painter.drawPixmap(x_offset, y_offset, scaled_bg)
+        
+        # 绘制朝向文本
+        painter.setFont(QFont("Arial", 18, QFont.Bold))
+        painter.setPen(QPen(QColor("#3498DB")))
+        painter.drawText(QRect(0, 0, self.size, self.size), 
+                         Qt.AlignCenter, f"{int(self.heading)}°")
+        
+        # 绘制旋转的指针 - 确保指针指向顶部
+        if not self.needle.isNull():
+            painter.save()  # 保存当前绘制状态
+            
+            # 移动到中心点
+            painter.translate(center_x, center_y)
+            
+            # 旋转画布，将指针放在顶部（-90度），再加上航向角度
+            # 注意航向是顺时针方向，而Qt旋转是逆时针，所以用负值
+            painter.rotate(self.heading + 1)  # -90度调整确保指针默认指向顶部
+            
+            # 缩放指针图像
+            needle_size = self.size * 1.25  # 适当缩小指针尺寸
+            scaled_needle = self.needle.scaled(needle_size, needle_size, 
+                                          Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            
+            # 计算指针位置偏移，使针尾在中心点
+            pointer_x_offset = -scaled_needle.width() / 2
+            pointer_y_offset = -scaled_needle.height() / 2
+            
+            # 绘制指针，确保正确放置
+            painter.drawPixmap(pointer_x_offset, pointer_y_offset, scaled_needle)
+            
+            painter.restore()  # 恢复绘制状态
+    
+    def sizeHint(self):
+        return QSize(self.size, self.size) 

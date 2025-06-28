@@ -117,6 +117,9 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
             "marker": False
         }
         
+        # 添加关闭事件处理
+        self.closeEvent = self.handleCloseEvent
+        
         # 设置窗口标题
         self.setWindowTitle("无人机自主搜索系统")
         
@@ -213,8 +216,8 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         
         # 继续其他初始化...
         
-        # 在所有初始化完成后设置RViz悬浮信息面板
-        self.setupRVizOverlay()
+        # 使用定时器延迟创建悬浮窗口，确保主窗口和RViz框架已完全显示
+        QTimer.singleShot(2000, self.setupAllOverlays)  # 增加延迟至2秒，确保RViz完全加载
         
         # 初始化日志窗口
         self.log_window = None
@@ -1689,17 +1692,34 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         except Exception as e:
             print(f"切换RViz显示面板时出错: {str(e)}")
 
-    def updateAttitudeDisplay(self):
+    def updateAttitudeDisplay(self, data=None):
         """更新姿态指示器显示"""
         try:
             if hasattr(self, 'attitude_indicator'):
                 # 从话题数据中获取姿态信息，如果没有则模拟生成
                 if self.topic_subscriber and self.topic_subscriber.is_topic_active("attitude"):
                     # 如果有真实姿态数据，使用真实数据
-                    attitude_data = self.topic_subscriber.get_latest_data("attitude")
+                    attitude_data = data if data else self.topic_subscriber.get_latest_data("attitude")
                     if attitude_data:
-                        self.pitch = attitude_data.get("pitch", 0)  # 俯仰角
-                        self.roll = attitude_data.get("roll", 0)    # 滚转角
+                        # 获取俯仰角并检查是否为列表
+                        pitch_value = attitude_data.get("pitch", 0)
+                        if isinstance(pitch_value, list):
+                            if len(pitch_value) > 0:
+                                pitch_value = pitch_value[0]
+                            else:
+                                pitch_value = 0
+                        self.pitch = pitch_value
+                        
+                        # 获取滚转角并检查是否为列表
+                        roll_value = attitude_data.get("roll", 0)
+                        if isinstance(roll_value, list):
+                            if len(roll_value) > 0:
+                                roll_value = roll_value[0]
+                            else:
+                                roll_value = 0
+                        self.roll = roll_value
+                        
+                        # 更新姿态指示器
                         self.attitude_indicator.update_attitude(self.pitch, self.roll)
                 else:
                     # 没有实际姿态数据时，将姿态指示器设置为零位
@@ -3103,14 +3123,15 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
 
 
     def setupRVizOverlay(self):
-        """创建悬浮在RViz上方的信息面板 - 仅图标+值"""
-        # 创建悬浮面板容器 - 指定父组件，使其显示在RViz框架上
+        """创建悬浮在RViz上方的信息面板 - 独立窗口，但跟随RViz框架移动"""
+        # 创建悬浮面板容器 - 独立窗口
         self.rviz_overlay = QWidget()
         self.rviz_overlay.setObjectName("rvizOverlay")
         
-        # 设置窗口无边框、始终置顶
-        self.rviz_overlay.setWindowFlags(Qt.FramelessWindowHint | Qt.WindowStaysOnTopHint)
-        # # 设置窗口背景透明
+        # 设置窗口标志，使其作为工具窗口、无边框并置顶
+        self.rviz_overlay.setWindowFlags(Qt.Tool | Qt.FramelessWindowHint)
+        
+        # 设置窗口背景透明
         self.rviz_overlay.setAttribute(Qt.WA_TranslucentBackground)
         
         # 使用浅黑色背景，30%不透明度，添加较大圆角
@@ -3184,66 +3205,38 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         # 设置固定高度，宽度为RViz宽度的80%
         self.rviz_overlay.setFixedHeight(40)
         
-        # 定位函数 - 居中于RViz上方
+        # 更新位置的函数
         def updateOverlayPosition():
-            frame_size = self.frame.size()
-            frame_pos = self.frame.mapToGlobal(QPoint(0, 0))
-            new_width = int(frame_size.width() * 0.8)
-            self.rviz_overlay.setFixedWidth(new_width)
-            
-            # 计算相对于屏幕的全局位置
-            x_pos = frame_pos.x() + (frame_size.width() - new_width) // 2
-            y_pos = frame_pos.y() + 20
-            self.rviz_overlay.move(x_pos, y_pos)
+            if hasattr(self, 'frame') and self.frame:
+                frame_rect = self.frame.geometry()
+                frame_pos = self.frame.mapToGlobal(QPoint(0, 0))
+                
+                new_width = int(frame_rect.width() * 0.8)
+                self.rviz_overlay.setFixedWidth(new_width)
+                
+                # 居中显示在上方
+                x_pos = frame_pos.x() + (frame_rect.width() - new_width) // 2
+                y_pos = frame_pos.y() + 20
+                
+                # 移动窗口
+                self.rviz_overlay.move(x_pos, y_pos)
+                
+                # 确保窗口可见
+                if not self.rviz_overlay.isVisible():
+                    self.rviz_overlay.show()
         
-        # 创建resize事件处理函数
-        def frame_resize_event(event):
-            QFrame.resizeEvent(self.frame, event)
-            updateOverlayPosition()
-            return None
-            
-        self.frame.resizeEvent = frame_resize_event
-        
-        # 创建move事件处理函数
-        def main_window_move_event(event):
-            QMainWindow.moveEvent(self, event)
-            updateOverlayPosition()
-            return None
-            
-        self.moveEvent = main_window_move_event
-        
-        # 显示悬浮窗口
-        self.rviz_overlay.show()
+        # 创建窗口移动和大小变化事件处理函数
+        self.frame_move_timer = QTimer(self)
+        self.frame_move_timer.timeout.connect(updateOverlayPosition)
+        self.frame_move_timer.start(50)  # 50毫秒更新一次位置
         
         # 初始位置更新
-        updateOverlayPosition()
+        QTimer.singleShot(100, updateOverlayPosition)
         
         # 更新数据的定时器
         self.data_update_timer = QTimer(self)
         self.data_update_timer.timeout.connect(self.updateOverlayData)
         self.data_update_timer.start(300)  # 降低更新频率到300ms
-        
-        # 在主窗口关闭事件中关闭悬浮窗口
-        old_close_event = self.closeEvent if hasattr(self, 'closeEvent') else None
-        
-        def new_close_event(event):
-            # 关闭悬浮窗口
-            if hasattr(self, 'rviz_overlay') and self.rviz_overlay:
-                self.rviz_overlay.close()
-                
-            # 静默关闭后台程序（不显示任何对话框）
-            try:
-                self.silentStopDroneSystem()
-            except Exception as e:
-                print(f"静默关闭程序时出错: {str(e)}")
-                
-            # 调用原来的关闭事件处理函数
-            if old_close_event:
-                old_close_event(event)
-            else:
-                event.accept()
-                
-        self.closeEvent = new_close_event
 
     def updateOverlayData(self):
         """更新信息条数据"""
@@ -3401,6 +3394,201 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
                 
         except Exception as e:
             print(f"静默停止无人机系统时出错: {str(e)}")
+            
+    def setupCompass(self):
+        """创建指南针组件并添加到RViz右下角，独立窗口但跟随RViz框架移动"""
+        # 导入指南针组件
+        from dashboard import CompassWidget
+        
+        # 创建指南针组件
+        self.compass = CompassWidget(parent=self)  # 传入self作为参考，但不作为父组件
+        
+        # 定义位置更新函数
+        def updateCompassPosition():
+            if hasattr(self, 'frame') and self.frame:
+                frame_rect = self.frame.geometry()
+                frame_pos = self.frame.mapToGlobal(QPoint(0, 0))
+                
+                # 放在右下角，增加边距让它更靠左上方一些
+                margin_x = 60  # 增加水平边距
+                margin_y = 50  # 增加垂直边距
+                x_pos = frame_pos.x() + frame_rect.width() - self.compass.width() - margin_x
+                y_pos = frame_pos.y() + frame_rect.height() - self.compass.height() - margin_y
+                
+                # 移动窗口
+                self.compass.move(x_pos, y_pos)
+                
+                # 确保窗口可见
+                if not self.compass.isVisible():
+                    self.compass.show()
+        
+        # 将函数保存为类实例方法，以便后续修改
+        self.updateCompassPosition = updateCompassPosition
+        
+        # 创建窗口移动和大小变化事件处理函数
+        self.compass_move_timer = QTimer(self)
+        self.compass_move_timer.timeout.connect(updateCompassPosition)
+        self.compass_move_timer.start(50)  # 50毫秒更新一次位置
+        
+        # 初始位置更新
+        QTimer.singleShot(100, updateCompassPosition)
+        
+        # 创建更新数据的函数
+        def updateCompassData():
+            try:
+                if hasattr(self, 'topic_subscriber') and self.topic_subscriber:
+                    # 尝试从姿态数据获取航向信息
+                    attitude_data = self.topic_subscriber.get_latest_data("attitude")
+                    if attitude_data and "yaw" in attitude_data:
+                        # 检查yaw是否为列表，如果是则取第一个元素
+                        yaw_value = attitude_data["yaw"]
+                        if isinstance(yaw_value, list):
+                            if len(yaw_value) > 0:
+                                yaw_value = yaw_value[0]  # 取列表的第一个元素
+                            else:
+                                yaw_value = 0  # 空列表时使用默认值
+                        
+                        # 将弧度转换为角度并取模360
+                        heading = math.degrees(yaw_value) % 360
+                        self.compass.set_heading(heading)
+                    
+                    # 如果没有姿态数据，也可以尝试从GPS航向获取
+                    if (not attitude_data or "yaw" not in attitude_data) and hasattr(self.topic_subscriber, 'get_latest_data'):
+                        gps_data = self.topic_subscriber.get_latest_data("gps")
+                        if gps_data and "heading" in gps_data:
+                            heading_value = gps_data["heading"]
+                            # 同样检查heading是否为列表
+                            if isinstance(heading_value, list):
+                                if len(heading_value) > 0:
+                                    heading_value = heading_value[0]
+                                else:
+                                    heading_value = 0
+                            
+                            heading = heading_value % 360
+                            self.compass.set_heading(heading)
+            except Exception as e:
+                print(f"更新指南针数据时出错: {str(e)}")
+        
+        # 创建定时更新的定时器
+        self.compass_update_timer = QTimer(self)
+        self.compass_update_timer.timeout.connect(updateCompassData)
+        self.compass_update_timer.start(100)  # 10Hz更新频率
+
+    def setupAttitudeWidget(self):
+        """创建姿态指示器组件并添加到RViz右下角，独立窗口但跟随RViz框架移动"""
+        # 导入姿态指示器组件
+        from dashboard import AttitudeIndicatorWidget
+        
+        # 创建姿态指示器组件
+        self.attitude_widget = AttitudeIndicatorWidget(parent=self)  # 传入self作为参考，但不作为父组件
+        
+        # 定义位置更新函数 - 直接基于RViz框架位置计算
+        def updateAttitudeWidgetPosition():
+            if hasattr(self, 'frame') and self.frame:
+                frame_rect = self.frame.geometry()
+                frame_pos = self.frame.mapToGlobal(QPoint(0, 0))
+                
+                # 放在右下角位置，与指南针并排
+                margin_x = 260  # 增加水平边距，放在指南针左侧
+                margin_y = 50   # 垂直边距与指南针相同
+                x_pos = frame_pos.x() + frame_rect.width() - self.attitude_widget.width() - margin_x
+                y_pos = frame_pos.y() + frame_rect.height() - self.attitude_widget.height() - margin_y
+                
+                # 确保不会移出窗口左侧
+                if x_pos < frame_pos.x() + 20:
+                    # 如果左侧空间不足，放在上方
+                    x_pos = frame_pos.x() + frame_rect.width() - self.attitude_widget.width() - 60
+                    y_pos = frame_pos.y() + frame_rect.height() - self.attitude_widget.height() - 240
+                
+                # 移动窗口
+                self.attitude_widget.move(x_pos, y_pos)
+                
+                # 确保窗口可见
+                if not self.attitude_widget.isVisible():
+                    self.attitude_widget.show()
+        
+        # 将函数保存为类实例方法，以便后续修改
+        self.updateAttitudeWidgetPosition = updateAttitudeWidgetPosition
+        
+        # 创建窗口移动和大小变化事件处理函数
+        self.attitude_move_timer = QTimer(self)
+        self.attitude_move_timer.timeout.connect(updateAttitudeWidgetPosition)
+        self.attitude_move_timer.start(50)  # 50毫秒更新一次位置
+        
+        # 初始位置更新
+        QTimer.singleShot(100, updateAttitudeWidgetPosition)
+        
+        # 创建更新数据的函数
+        def updateAttitudeWidgetData():
+            if hasattr(self, 'topic_subscriber') and self.topic_subscriber:
+                # 从姿态数据获取俯仰和滚转角度
+                attitude_data = self.topic_subscriber.get_latest_data("attitude")
+                if attitude_data:
+                    # 获取俯仰角并检查是否为列表
+                    pitch_value = attitude_data.get("pitch", 0)
+                    if isinstance(pitch_value, list):
+                        if len(pitch_value) > 0:
+                            pitch_value = pitch_value[0]
+                        else:
+                            pitch_value = 0
+                    
+                    # 获取滚转角并检查是否为列表
+                    roll_value = attitude_data.get("roll", 0)
+                    if isinstance(roll_value, list):
+                        if len(roll_value) > 0:
+                            roll_value = roll_value[0]
+                        else:
+                            roll_value = 0
+                    
+                    # 更新姿态指示器
+                    self.attitude_widget.update_attitude(pitch_value, roll_value)
+        
+        # 创建定时更新的定时器
+        self.attitude_widget_update_timer = QTimer(self)
+        self.attitude_widget_update_timer.timeout.connect(updateAttitudeWidgetData)
+        self.attitude_widget_update_timer.start(50)  # 20Hz更新频率
+
+    def setupAllOverlays(self):
+        """同时创建所有悬浮窗口组件，确保它们同时显示"""
+        # 1. 创建RViz悬浮信息面板
+        self.setupRVizOverlay()
+        
+        # 2. 创建指南针组件
+        self.setupCompass()
+        
+        # 3. 创建姿态指示器组件
+        self.setupAttitudeWidget()
+        
+    def handleCloseEvent(self, event):
+        """关闭事件处理函数，确保关闭时清理资源"""
+        # 关闭所有悬浮窗口
+        if hasattr(self, 'rviz_overlay') and self.rviz_overlay:
+            self.rviz_overlay.close()
+        
+        if hasattr(self, 'compass') and self.compass:
+            self.compass.close()
+            
+        if hasattr(self, 'attitude_widget') and self.attitude_widget:
+            self.attitude_widget.close()
+            
+        # 停止所有定时器
+        if hasattr(self, 'frame_move_timer') and self.frame_move_timer:
+            self.frame_move_timer.stop()
+            
+        if hasattr(self, 'compass_move_timer') and self.compass_move_timer:
+            self.compass_move_timer.stop()
+            
+        if hasattr(self, 'attitude_move_timer') and self.attitude_move_timer:
+            self.attitude_move_timer.stop()
+            
+        # 静默关闭后台程序（不显示任何对话框）
+        try:
+            self.silentStopDroneSystem()
+        except Exception as e:
+            print(f"静默关闭程序时出错: {str(e)}")
+            
+        # 接受关闭事件
+        event.accept()
 
 ## Start the Application
 ## ^^^^^^^^^^^^^^^^^^^^^

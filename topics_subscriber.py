@@ -678,7 +678,19 @@ class TopicsSubscriber:
             
             # 调用注册的回调函数
             if "attitude" in self.callbacks:
-                self.callbacks["attitude"](self.data["attitude"])
+                # 检查callbacks是否是列表类型
+                if isinstance(self.callbacks["attitude"], list):
+                    for callback in self.callbacks["attitude"]:
+                        try:
+                            callback(self.data["attitude"])
+                        except Exception as e:
+                            rospy.logerr(f"执行姿态回调函数时出错: {str(e)}")
+                else:
+                    # 向后兼容，如果不是列表则直接调用
+                    try:
+                        self.callbacks["attitude"](self.data["attitude"])
+                    except Exception as e:
+                        rospy.logerr(f"执行姿态回调函数时出错: {str(e)}")
                 
         except Exception as e:
             rospy.logerr(f"处理姿态数据时出错: {str(e)}")
