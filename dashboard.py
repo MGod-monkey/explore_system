@@ -428,10 +428,10 @@ class UIButton(QWidget):
         # self.bottomText = "功能待定"
         
         # 设置颜色 - 使用与系统主题匹配的配色方案
-        self.centerColor = QColor("#27AE60")  # 绿色，启动按钮
+        self.centerColor = QColor("#62e336")  # 绿色，启动按钮
         self.topColor = QColor("#8E44AD")     # 紫色，返航按钮
-        self.rightColor = QColor("#E74C3C")   # 红色，停止按钮
-        self.leftColor = QColor("#2980B9")    # 蓝色，探索按钮
+        self.rightColor = QColor("#e33662")   # 红色，停止按钮
+        self.leftColor = QColor("#3662e3")    # 蓝色，探索按钮
         self.bottomColor = QColor("#7F8C8D")  # 灰色，待定按钮
         
         # 加载中间按钮图标
@@ -485,7 +485,7 @@ class UIButton(QWidget):
         font = QFont("WenQuanYi Micro Hei", 8)
         # 位置调整，使文字在扇形中央
         textX = radius1 * 0.24
-        textY = radius1 * 0.05
+        textY = radius1 * 0.048
         textPath.addText(textX, textY, font, self.rightText)
         
         # 绘制图形和文字
@@ -571,7 +571,7 @@ class UIButton(QWidget):
         font = QFont("WenQuanYi Micro Hei", 8)
         # 位置调整，使文字在扇形中央
         textX = -radius1 * 0.48
-        textY = radius1 * 0.05
+        textY = radius1 * 0.048
         textPath.addText(textX, textY, font, self.leftText)
       
         # 绘制小扇形

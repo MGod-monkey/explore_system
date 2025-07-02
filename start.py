@@ -61,8 +61,8 @@ try:
 except ImportError:
     pass
 
-# 确保QTimer可用
-from python_qt_binding.QtCore import QTimer
+# 确保QTimer和QPropertyAnimation可用
+from python_qt_binding.QtCore import QTimer, QPropertyAnimation, QEasingCurve
 
 ## 导入生成的资源文件（图标和图片资源）
 try:
@@ -216,11 +216,22 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         
         # 继续其他初始化...
         
-        # 使用定时器延迟创建悬浮窗口，确保主窗口和RViz框架已完全显示
-        QTimer.singleShot(2000, self.setupAllOverlays)  # 增加延迟至2秒，确保RViz完全加载
-        
         # 初始化日志窗口
         self.log_window = None
+        
+        # 添加标志，控制是否启用鼠标跟踪和侧栏是否固定
+        self.enable_sidebar_hover = False
+        self.left_sidebar_pinned = False
+        self.right_sidebar_pinned = False
+        
+        # 创建鼠标跟踪区域定时器，用于检测鼠标位置
+        self.sidebar_hover_timer = QTimer(self)
+        self.sidebar_hover_timer.timeout.connect(self.checkMousePosition)
+        self.sidebar_hover_timer.start(50)  # 每50ms检查一次鼠标位置，提高响应速度
+        
+        # 使用定时器延迟创建悬浮窗口，确保主窗口和RViz框架已完全显示
+        # 先创建悬浮窗口，然后再自动隐藏左侧栏，避免冲突
+        QTimer.singleShot(1000, self.setupAllOverlaysAndHideSidebar)
 
         ## 禁用菜单栏、状态栏和"隐藏停靠"按钮
         self.frame.setMenuBar(None)
@@ -374,92 +385,106 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         status_group_layout.setContentsMargins(10, 20, 10, 10)  # 增加内边距
         status_group_layout.setSpacing(15)  # 增加组件间距
         
-        # 创建姿态指示器（替换原速度表盘）
-        try:
-            # 确保已正确导入AttitudeIndicator类
-            from dashboard import AttitudeIndicator
-            
-            # 创建姿态指示器容器，保持正方形比例
-            attitude_container = QWidget()
-            attitude_container.setMinimumHeight(425)  # 适当减小最小高度
-            attitude_container.setMinimumWidth(425)   # 设置与高度相同的宽度，保持正方形比例
-            # attitude_container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)  # 允许扩展
-            attitude_container.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)  # 设置为最大高度策略
-            
-            # # 确保姿态容器在缩放时保持正方形比例
-            attitude_container.setFixedWidth(425)  # 固定宽度
-            attitude_container.setFixedHeight(425)  # 固定高度相同以保持正方形
-            attitude_layout = QVBoxLayout(attitude_container)
-            attitude_layout.setContentsMargins(0, 0, 0, 0)
-            
-            # 创建姿态指示器实例
-            self.attitude_indicator = AttitudeIndicator(attitude_container)
-            attitude_layout.addWidget(self.attitude_indicator)
-            
-            # 添加框架突出显示姿态指示器
-            attitude_frame = QFrame()
-            attitude_frame.setFrameShape(QFrame.StyledPanel)
-            attitude_frame.setStyleSheet("background-color: #1A202C; border-radius: 10px; border: 1px solid #3498DB;")
-            attitude_frame_layout = QVBoxLayout(attitude_frame)
-            attitude_frame_layout.setContentsMargins(5, 5, 5, 5)  # 减小内边距让姿态指示器占用更多空间
-            attitude_frame_layout.addWidget(attitude_container)
-            attitude_frame.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)  # 设置为最大高度策略
-            
-            # 添加到无人机状态组
-            status_group_layout.addWidget(attitude_frame, 1)  # 稍微减小姿态指示器的拉伸系数
-            
-            # 设置姿态更新定时器
-            self.attitude_timer = QTimer(self)
-            self.attitude_timer.timeout.connect(self.updateAttitudeDisplay)
-            self.attitude_timer.start(50)  # 20fps更新频率
-        except Exception as e:
-            # 如果姿态指示器组件不可用，显示错误信息
-            error_label = QLabel(f"姿态指示器组件不可用: {str(e)}")
-            error_label.setStyleSheet("color: red;")
-            error_label.setAlignment(Qt.AlignCenter)
-            status_group_layout.addWidget(error_label)
-            print(f"创建姿态指示器时出错: {str(e)}")
-        
-        # 添加其他状态信息（使用更小的间距）
+        # 创建无人机状态信息容器，使用垂直布局使界面更美观
         info_container = QWidget()
-        # info_container.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)  # 设置为最大高度策略
         info_container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)  # 允许扩展
-        info_layout = QGridLayout(info_container)
-        info_layout.setContentsMargins(5, 5, 5, 5)
-        info_layout.setSpacing(10)  # 减小间距
+        info_layout = QVBoxLayout(info_container)
+        info_layout.setContentsMargins(10, 15, 10, 15)  # 增加内边距使布局更美观
+        info_layout.setSpacing(20)  # 增加间距
         
-        # 添加各种状态标签
-        # 增加标签字体大小
+        # 创建两列布局的容器
+        status_grid = QWidget()
+        status_grid_layout = QGridLayout(status_grid)
+        status_grid_layout.setContentsMargins(0, 0, 0, 0)
+        status_grid_layout.setSpacing(15)  # 合适的间距
+        
+        # 减小字体大小以确保文本显示完整
         label_style = "font-size: 12pt; font-weight: normal; color: #FFFFFF;"
         value_style = "font-size: 12pt; font-weight: bold; color: #3498DB;"
         
-        mode_label_desc = QLabel("无人机模式:")
+        # 添加重要状态标签 - 使用两列布局
+        row = 0
+        
+        # 第一行 - 无人机模式和连接状态
+        mode_label_desc = QLabel("模式:")  # 缩短标签文字
         mode_label_desc.setStyleSheet(label_style)
-        info_layout.addWidget(mode_label_desc, 0, 0)
+        status_grid_layout.addWidget(mode_label_desc, row, 0)
         self.mode_label = QLabel("MANUAL")
         self.mode_label.setStyleSheet(value_style)
-        info_layout.addWidget(self.mode_label, 0, 1)
+        self.mode_label.setMinimumWidth(150)  # 增加最小宽度确保文本显示完整
+        status_grid_layout.addWidget(self.mode_label, row, 1)
         
         conn_label_desc = QLabel("连接状态:")
         conn_label_desc.setStyleSheet(label_style)
-        info_layout.addWidget(conn_label_desc, 1, 0)
+        status_grid_layout.addWidget(conn_label_desc, row, 2)
         self.connection_label = QLabel("已连接")
         self.connection_label.setStyleSheet("font-size: 12pt; font-weight: bold; color: #2ECC71;")
-        info_layout.addWidget(self.connection_label, 1, 1)
+        status_grid_layout.addWidget(self.connection_label, row, 3)
         
+        row += 1
+        
+        # 第二行 - 飞行高度和地面速度
         alt_label_desc = QLabel("飞行高度:")
         alt_label_desc.setStyleSheet(label_style)
-        info_layout.addWidget(alt_label_desc, 2, 0)
+        status_grid_layout.addWidget(alt_label_desc, row, 0)
         self.altitude_label = QLabel("0.0000 m")
         self.altitude_label.setStyleSheet(value_style)
-        info_layout.addWidget(self.altitude_label, 2, 1)
+        status_grid_layout.addWidget(self.altitude_label, row, 1)
         
         speed_label_desc = QLabel("地面速度:")
         speed_label_desc.setStyleSheet(label_style)
-        info_layout.addWidget(speed_label_desc, 3, 0)
+        status_grid_layout.addWidget(speed_label_desc, row, 2)
         self.ground_speed_label = QLabel("0.0000 m/s")
         self.ground_speed_label.setStyleSheet(value_style)
-        info_layout.addWidget(self.ground_speed_label, 3, 1)
+        status_grid_layout.addWidget(self.ground_speed_label, row, 3)
+        
+        row += 1
+        
+        # 第三行 - 姿态角度信息
+        pitch_label_desc = QLabel("俯仰角:")
+        pitch_label_desc.setStyleSheet(label_style)
+        status_grid_layout.addWidget(pitch_label_desc, row, 0)
+        self.pitch_label = QLabel("0.00°")
+        self.pitch_label.setStyleSheet(value_style)
+        status_grid_layout.addWidget(self.pitch_label, row, 1)
+        
+        roll_label_desc = QLabel("滚转角:")
+        roll_label_desc.setStyleSheet(label_style)
+        status_grid_layout.addWidget(roll_label_desc, row, 2)
+        self.roll_label = QLabel("0.00°")
+        self.roll_label.setStyleSheet(value_style)
+        status_grid_layout.addWidget(self.roll_label, row, 3)
+        
+        row += 1
+        
+        # 第四行 - 偏航角和电池状态
+        yaw_label_desc = QLabel("偏航角:")
+        yaw_label_desc.setStyleSheet(label_style)
+        status_grid_layout.addWidget(yaw_label_desc, row, 0)
+        self.yaw_label = QLabel("0.00°")
+        self.yaw_label.setStyleSheet(value_style)
+        status_grid_layout.addWidget(self.yaw_label, row, 1)
+        
+        battery_status_desc = QLabel("电池状态:")
+        battery_status_desc.setStyleSheet(label_style)
+        status_grid_layout.addWidget(battery_status_desc, row, 2)
+        self.battery_status_label = QLabel(f"{self.battery_percentage:.1f}% ({self.battery_voltage:.2f}V)")
+        self.battery_status_label.setStyleSheet(value_style)
+        status_grid_layout.addWidget(self.battery_status_label, row, 3)
+        
+        # 设置列宽度比例，确保均匀分布
+        for col in range(4):
+            status_grid_layout.setColumnStretch(col, 1)
+            
+        # 添加状态网格到容器
+        info_layout.addWidget(status_grid)
+        
+        # 添加美观的分隔线
+        separator = QFrame()
+        separator.setFrameShape(QFrame.HLine)
+        separator.setFrameShadow(QFrame.Sunken)
+        separator.setStyleSheet("background-color: #3498DB; min-height: 2px;")
+        info_layout.addWidget(separator)
         
         status_group_layout.addWidget(info_container, 1)  # 使用拉伸系数1
         
@@ -758,9 +783,9 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         """)
         self.toggle_sidebar_btn.setCursor(Qt.PointingHandCursor)
         
-        # 当按钮被点击时触发侧边栏的显示/隐藏
+        # 当按钮被点击时触发侧边栏的显示/隐藏或固定
         self.sidebar_expanded = True
-        self.toggle_sidebar_btn.clicked.connect(self.toggleSidebar)
+        self.toggle_sidebar_btn.clicked.connect(self.toggleLeftSidebarPinned)
         
         # 将按钮添加到布局
         sidebar_control_layout.addWidget(self.toggle_sidebar_btn, 0, Qt.AlignCenter)
@@ -820,9 +845,9 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         """)
         self.toggle_right_sidebar_btn.setCursor(Qt.PointingHandCursor)
         
-        # 当按钮被点击时触发右侧栏的显示/隐藏
+        # 当按钮被点击时触发右侧栏的显示/隐藏或固定
         self.right_sidebar_expanded = True
-        self.toggle_right_sidebar_btn.clicked.connect(self.toggleRightSidebar)
+        self.toggle_right_sidebar_btn.clicked.connect(self.toggleRightSidebarPinned)
         
         # 将按钮添加到布局
         right_sidebar_control_layout.addWidget(self.toggle_right_sidebar_btn, 0, Qt.AlignCenter)
@@ -1159,7 +1184,7 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         
         # 创建ROS时间显示(英文)
         self.ros_time_label = QLabel("Time: 0.0000")
-        self.ros_time_label.setStyleSheet("color: #3498DB;")
+        self.ros_time_label.setStyleSheet("color: #3498DB; padding-right: 50px;")  # 增加右侧内边距，避免与右侧按钮重叠
         status_bar.addPermanentWidget(self.ros_time_label)
         
         # 设置定时器以更新状态栏信息
@@ -1204,27 +1229,160 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         """此方法已不再使用，保留以避免可能的引用错误"""
         self.toggleRVizDisplayPanel()
     
-    def toggleSidebar(self):
-        """显示或隐藏侧边栏"""
-        if self.sidebar_expanded:
-            # 隐藏侧边栏
-            self.left_sidebar.setMaximumWidth(0)
-            self.left_sidebar.setMinimumWidth(0)
-            self.toggle_sidebar_btn.setIcon(QIcon(":/images/icons/dropright.svg"))  # 切换图标为右箭头
-            self.sidebar_expanded = False
-            
-            # 更新分割器尺寸
-            sizes = self.main_splitter.sizes()
-            self.main_splitter.setSizes([0, 20, sizes[0] + sizes[2]])
+    def toggleLeftSidebarPinned(self):
+        """切换左侧栏的固定状态"""
+        if self.left_sidebar_pinned:
+            # 如果当前是固定状态，解除固定并隐藏
+            self.left_sidebar_pinned = False
+            self.toggleSidebar(hide=True, animate=True)
+            # 更新按钮样式，恢复正常
+            self.toggle_sidebar_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #1A202C;  /* 与周围颜色相协调 */
+                    border: none;
+                    border-radius: 0;
+                    padding: 2px;
+                }
+                QPushButton:hover {
+                    background-color: #3498DB;  /* 蓝色悬停效果 */
+                }
+                QPushButton:pressed {
+                    background-color: #2980B9;  /* 按下效果 */
+                }
+            """)
         else:
-            # 恢复侧边栏
-            self.left_sidebar.setFixedWidth(500)  # 固定宽度500px
-            self.toggle_sidebar_btn.setIcon(QIcon(":/images/icons/dropleft.svg"))  # 切换图标为左箭头
-            self.sidebar_expanded = True
+            # 如果当前非固定，切换为固定状态并显示
+            self.left_sidebar_pinned = True
+            self.toggleSidebar(hide=False, animate=True)
+            # 更新按钮样式，显示固定状态
+            self.toggle_sidebar_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #3498DB;  /* 蓝色背景表示已固定 */
+                    border: none;
+                    border-radius: 0;
+                    padding: 2px;
+                }
+                QPushButton:hover {
+                    background-color: #2980B9;
+                }
+                QPushButton:pressed {
+                    background-color: #2980B9;
+                }
+            """)
+    
+    def toggleSidebar(self, hide=None, animate=False):
+        """显示或隐藏侧边栏
+        
+        参数:
+            hide: 是否隐藏侧边栏。如果为None，则切换当前状态
+            animate: 是否使用动画效果
+        """
+        # 如果指定了hide参数，则根据参数决定是否隐藏
+        should_hide = hide if hide is not None else self.sidebar_expanded
+        
+        # 如果已经在动画中，则不重复触发
+        if hasattr(self, 'sidebar_animation') and self.sidebar_animation.state() == QPropertyAnimation.Running:
+            return
             
-            # 更新分割器尺寸
-            sizes = self.main_splitter.sizes()
-            self.main_splitter.setSizes([500, 20, sizes[2] - 500])
+        # 打印调试信息
+        # print(f"切换侧边栏: hide={should_hide}, animate={animate}, 当前状态={self.sidebar_expanded}")
+        
+        if should_hide:
+            # 隐藏侧边栏
+            if animate:
+                # 使用动画效果
+                self.sidebar_animation = QPropertyAnimation(self.left_sidebar, b"maximumWidth")
+                self.sidebar_animation.setDuration(200)  # 动画持续时间200ms
+                current_width = self.left_sidebar.width()
+                self.sidebar_animation.setStartValue(current_width)
+                self.sidebar_animation.setEndValue(0)
+                self.sidebar_animation.setEasingCurve(QEasingCurve.InOutQuad)
+                
+                # 确保侧边栏可见性正确
+                self.left_sidebar.setVisible(True)
+                
+                # 动画结束后更新状态
+                self.sidebar_animation.finished.connect(lambda: self.finishSidebarAnimation(False))
+                
+                # 启动动画
+                self.sidebar_animation.start()
+                
+                # 立即更新状态，但不隐藏侧边栏（等动画完成）
+                self.updateSidebarState(False)
+                
+                # 更新分割器尺寸
+                sizes = self.main_splitter.sizes()
+                self.main_splitter.setSizes([0, 20, sizes[0] + sizes[2]])
+            else:
+                # 直接隐藏
+                self.left_sidebar.setMaximumWidth(0)
+                self.left_sidebar.setMinimumWidth(0)
+                self.left_sidebar.setVisible(False)
+                self.updateSidebarState(False)
+                
+                # 更新分割器尺寸
+                sizes = self.main_splitter.sizes()
+                self.main_splitter.setSizes([0, 20, sizes[0] + sizes[2]])
+        else:
+            # 显示侧边栏
+            if animate:
+                # 先设置最大宽度，以便动画可以工作
+                self.left_sidebar.setMaximumWidth(500)
+                self.left_sidebar.setMinimumWidth(0)
+                self.left_sidebar.setVisible(True)
+                
+                # 使用动画效果
+                self.sidebar_animation = QPropertyAnimation(self.left_sidebar, b"maximumWidth")
+                self.sidebar_animation.setDuration(200)  # 动画持续时间200ms
+                self.sidebar_animation.setStartValue(0)
+                self.sidebar_animation.setEndValue(500)
+                self.sidebar_animation.setEasingCurve(QEasingCurve.InOutQuad)
+                
+                # 动画结束后更新状态
+                self.sidebar_animation.finished.connect(lambda: self.finishSidebarAnimation(True))
+                
+                # 启动动画
+                self.sidebar_animation.start()
+                
+                # 立即更新状态
+                self.updateSidebarState(True)
+                
+                # 更新分割器尺寸
+                sizes = self.main_splitter.sizes()
+                self.main_splitter.setSizes([500, 20, sizes[2] - 500])
+            else:
+                # 直接显示
+                self.left_sidebar.setFixedWidth(500)  # 固定宽度500px
+                self.left_sidebar.setVisible(True)
+                self.updateSidebarState(True)
+                
+                # 更新分割器尺寸
+                sizes = self.main_splitter.sizes()
+                self.main_splitter.setSizes([500, 20, sizes[2] - 500])
+    
+    def finishSidebarAnimation(self, expanded):
+        """动画结束后的处理
+        
+        参数:
+            expanded: 是否展开
+        """
+        if not expanded:
+            # 动画结束后，如果是隐藏状态，则设置不可见以减少资源占用
+            self.left_sidebar.setVisible(False)
+        else:
+            # 如果是显示状态，确保最小宽度也设置好
+            self.left_sidebar.setMinimumWidth(500)
+    
+    def updateSidebarState(self, expanded):
+        """更新侧边栏状态
+        
+        参数:
+            expanded: 是否展开
+        """
+        self.sidebar_expanded = expanded
+        self.toggle_sidebar_btn.setIcon(QIcon(":/images/icons/dropleft.svg" if expanded else ":/images/icons/dropright.svg"))
+        self.toggle_sidebar_btn.style().unpolish(self.toggle_sidebar_btn)
+        self.toggle_sidebar_btn.style().polish(self.toggle_sidebar_btn)
 
     def onTopButtonClick(self):
         self.switchToView("Top View")
@@ -1247,32 +1405,40 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
     def updateBatteryStatus(self, battery_data):
         """更新电池状态显示"""
         try:
-            if not battery_data or not hasattr(self, 'voltage_label') or not hasattr(self, 'battery_icon_label'):
+            if not battery_data:
                 return
                 
             # 更新电池百分比和电压
             percentage = battery_data.get("percentage", 0.0) * 100  # 转换为百分比
             voltage = battery_data.get("voltage", 0.0)  # 获取电压值
+            current = battery_data.get("current", 0.0)  # 获取电流值
+            temperature = battery_data.get("temperature", 0.0)  # 获取温度
             
             # 保存数据以便在模拟模式下使用
             self.battery_percentage = percentage
             self.battery_voltage = voltage
             
-            # 更新电压显示
-            self.voltage_label.setText(f"{voltage:.2f} V")
+            # 更新顶部状态栏电压显示
+            if hasattr(self, 'voltage_label'):
+                self.voltage_label.setText(f"{voltage:.2f} V")
             
-            # 根据电量选择对应图标
-            if percentage <= 15:
-                icon_path = ":/images/icons/battery_0.svg"
-            elif percentage <= 50:
-                icon_path = ":/images/icons/battery_50.svg"
-            elif percentage <= 75:
-                icon_path = ":/images/icons/battery_75.svg"
-            else:
-                icon_path = ":/images/icons/battery_100.svg"
-                
-            # 更新电池图标
-            self.battery_icon_label.setPixmap(QPixmap(icon_path).scaled(24, 24, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            # 更新电池状态详情标签
+            if hasattr(self, 'battery_status_label'):
+                self.battery_status_label.setText(f"{percentage:.1f}% ({voltage:.2f}V)")
+            
+            # 根据电量选择对应图标并更新
+            if hasattr(self, 'battery_icon_label'):
+                if percentage <= 15:
+                    icon_path = ":/images/icons/battery_0.svg"
+                elif percentage <= 50:
+                    icon_path = ":/images/icons/battery_50.svg"
+                elif percentage <= 75:
+                    icon_path = ":/images/icons/battery_75.svg"
+                else:
+                    icon_path = ":/images/icons/battery_100.svg"
+                    
+                # 更新电池图标
+                self.battery_icon_label.setPixmap(QPixmap(icon_path).scaled(24, 24, Qt.KeepAspectRatio, Qt.SmoothTransformation))
             
             # 标记电池话题有数据
             self.topics_with_data["battery"] = True
@@ -1283,7 +1449,7 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
     def updatePositionDisplay(self, odometry_data):
         """更新位置信息显示"""
         try:
-            if not odometry_data or not hasattr(self, 'position_label'):
+            if not odometry_data:
                 return
                 
             # 获取位置数据
@@ -1291,8 +1457,9 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
             pos_y = odometry_data["position"]["y"]
             pos_z = odometry_data["position"]["z"]
             
-            # 更新位置标签，保留四位小数
-            self.position_label.setText(f"Position: (X:{pos_x:.4f} Y:{pos_y:.4f} Z:{pos_z:.4f})")
+            # 更新状态栏位置标签，保留四位小数
+            if hasattr(self, 'position_label'):
+                self.position_label.setText(f"Position: (X:{pos_x:.4f} Y:{pos_y:.4f} Z:{pos_z:.4f})")
             
             # 更新高度显示
             if hasattr(self, 'altitude_label'):
@@ -1315,6 +1482,11 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
             linear_y = velocity_data["linear"]["y"]
             linear_z = velocity_data["linear"]["z"]
             
+            # 获取角速度数据
+            angular_x = velocity_data["angular"]["x"]
+            angular_y = velocity_data["angular"]["y"]
+            angular_z = velocity_data["angular"]["z"]
+            
             # 计算合成速度(cm/s)
             speed = velocity_data.get("speed", 0.0)
             
@@ -1322,11 +1494,12 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
             self.speed = int(speed)
             self.linear_speed = math.sqrt(linear_x**2 + linear_y**2)  # 地面速度
             
-            # 不再需要更新挡位状态
-            
             # 更新地面速度标签
             if hasattr(self, 'ground_speed_label'):
                 self.ground_speed_label.setText(f"{self.linear_speed:.4f} m/s")
+                
+            # 标记速度话题有数据
+            self.topics_with_data["velocity"] = True
         except Exception as e:
             print(f"更新速度显示时出错: {str(e)}")
     
@@ -1339,19 +1512,25 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
             # 获取状态数据
             connected = status_data.get("connected", False)
             mode = status_data.get("mode", "")
+            armed = status_data.get("armed", False)
+            guided = status_data.get("guided", False)
             
             # 更新连接状态
             if hasattr(self, 'connection_label'):
                 if connected:
                     self.connection_label.setText("已连接")
-                    self.connection_label.setStyleSheet("color: #2ECC71;")
+                    self.connection_label.setStyleSheet("color: #2ECC71; font-size: 12pt; font-weight: bold;")
                 else:
                     self.connection_label.setText("未连接")
-                    self.connection_label.setStyleSheet("color: #E74C3C;")
+                    self.connection_label.setStyleSheet("color: #E74C3C; font-size: 12pt; font-weight: bold;")
             
             # 更新模式显示
             if hasattr(self, 'mode_label'):
                 self.mode_label.setText(mode if mode else "UNKNOWN")
+            
+            # 标记话题有数据
+            self.topics_with_data["status"] = True
+            
         except Exception as e:
             print(f"更新状态显示时出错: {str(e)}")
     
@@ -1467,10 +1646,18 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         # 更新ROS时间，精确到小数点后三位
         if not rospy.is_shutdown():
             try:
-                ros_time = rospy.get_time()
-                self.ros_time_label.setText(f"Time: {ros_time:.4f}")
-            except:
-                # 如果ROS节点未初始化，显示系统时间
+                # 检查ROS节点是否已初始化
+                if rospy.get_name() != "/unnamed":
+                    # 使用rospy.Time.now()获取当前ROS时间，而不是rospy.get_time()
+                    now = rospy.Time.now()
+                    ros_time = now.to_sec()  # 转换为秒
+                    self.ros_time_label.setText(f"Time: {ros_time:.4f}")
+                else:
+                    # 如果ROS节点未初始化，显示系统时间
+                    self.ros_time_label.setText(f"Time: {time.time():.4f}")
+            except Exception as e:
+                # 如果发生异常，显示系统时间
+                print(f"获取ROS时间出错: {str(e)}")
                 self.ros_time_label.setText(f"Time: {time.time():.4f}")
         
         # 显示话题连接状态
@@ -1579,7 +1766,7 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
                 if not hasattr(self, 'topic_status_indicator'):
                     # 创建状态指示器
                     self.topic_status_indicator = QLabel("ℹ️")
-                    self.topic_status_indicator.setStyleSheet("color: #3498DB; font-weight: bold; padding-left: 5px;")
+                    self.topic_status_indicator.setStyleSheet("color: #3498DB; font-weight: bold; padding-left: 5px; padding-right: 20px;")
                     self.topic_status_indicator.setToolTip(tooltip)
                     
                     # 将指示器添加到位置标签后面
@@ -1589,7 +1776,7 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
                             layout.addWidget(self.topic_status_indicator)
                 else:
                     self.topic_status_indicator.setText("ℹ️")
-                    self.topic_status_indicator.setStyleSheet("color: #3498DB; font-weight: bold; padding-left: 5px;")
+                    self.topic_status_indicator.setStyleSheet("color: #3498DB; font-weight: bold; padding-left: 5px; padding-right: 20px;")
                     self.topic_status_indicator.setToolTip(tooltip)
                     self.topic_status_indicator.show()
             return
@@ -1631,7 +1818,7 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
                 if not hasattr(self, 'topic_status_indicator'):
                     # 创建状态指示器
                     self.topic_status_indicator = QLabel("⚠️")
-                    self.topic_status_indicator.setStyleSheet("color: #E74C3C; font-weight: bold; padding-left: 5px;")
+                    self.topic_status_indicator.setStyleSheet("color: #E74C3C; font-weight: bold; padding-left: 5px; padding-right: 20px;")
                     self.topic_status_indicator.setToolTip(tooltip)
                     
                     # 将指示器添加到位置标签后面
@@ -1641,41 +1828,178 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
                             layout.addWidget(self.topic_status_indicator)
                 else:
                     self.topic_status_indicator.setText("⚠️")
-                    self.topic_status_indicator.setStyleSheet("color: #E74C3C; font-weight: bold; padding-left: 5px;")
+                    self.topic_status_indicator.setStyleSheet("color: #E74C3C; font-weight: bold; padding-left: 5px; padding-right: 20px;")
                     self.topic_status_indicator.setToolTip(tooltip)
                     self.topic_status_indicator.show()
         elif hasattr(self, 'topic_status_indicator'):
             # 如果所有话题都正常，隐藏指示器
             self.topic_status_indicator.hide()
 
-    def toggleRightSidebar(self):
-        """显示或隐藏右侧栏"""
-        if self.right_sidebar_expanded:
-            # 隐藏右侧栏
-            self.right_sidebar.setMaximumWidth(0)
-            self.right_sidebar.setMinimumWidth(0)
-            self.toggle_right_sidebar_btn.setIcon(QIcon(":/images/icons/dropleft.svg"))  # 切换图标为左箭头
-            self.right_sidebar_expanded = False
-            
-            # 更新分割器尺寸，将右侧栏的空间分配给中间的RViz区域
-            sizes = self.main_splitter.sizes()
-            new_sizes = [sizes[0], sizes[1], sizes[2] + sizes[4], sizes[3], 0]
-            self.main_splitter.setSizes(new_sizes)
+    def toggleRightSidebarPinned(self):
+        """切换右侧栏的固定状态"""
+        if self.right_sidebar_pinned:
+            # 如果当前是固定状态，解除固定并隐藏
+            self.right_sidebar_pinned = False
+            self.toggleRightSidebar(hide=True, animate=True)
+            # 更新按钮样式，恢复正常
+            self.toggle_right_sidebar_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #1A202C;  /* 与周围颜色相协调 */
+                    border: none;
+                    border-radius: 0;
+                    padding: 2px;
+                }
+                QPushButton:hover {
+                    background-color: #3498DB;  /* 蓝色悬停效果 */
+                }
+                QPushButton:pressed {
+                    background-color: #2980B9;  /* 按下效果 */
+                }
+            """)
         else:
-            # 恢复右侧栏
-            self.right_sidebar.setFixedWidth(650)  # 固定宽度650px
-            self.toggle_right_sidebar_btn.setIcon(QIcon(":/images/icons/dropright.svg"))  # 切换图标为右箭头
-            self.right_sidebar_expanded = True
-            
-            # 更新分割器尺寸，从中间区域分配空间给右侧栏
-            sizes = self.main_splitter.sizes()
-            if sizes[2] > 650:  # 确保中间区域有足够空间
-                new_sizes = [sizes[0], sizes[1], sizes[2] - 650, sizes[3], 650]
-            else:  # 如果中间区域空间不足，则按比例分配
-                total_space = sizes[2]
-                new_middle = max(int(total_space * 0.4), 100)  # 至少保留100px给中间区域
-                new_sizes = [sizes[0], sizes[1], new_middle, sizes[3], total_space - new_middle]
-            self.main_splitter.setSizes(new_sizes)
+            # 如果当前非固定，切换为固定状态并显示
+            self.right_sidebar_pinned = True
+            self.toggleRightSidebar(hide=False, animate=True)
+            # 更新按钮样式，显示固定状态
+            self.toggle_right_sidebar_btn.setStyleSheet("""
+                QPushButton {
+                    background-color: #3498DB;  /* 蓝色背景表示已固定 */
+                    border: none;
+                    border-radius: 0;
+                    padding: 2px;
+                }
+                QPushButton:hover {
+                    background-color: #2980B9;
+                }
+                QPushButton:pressed {
+                    background-color: #2980B9;
+                }
+            """)
+    
+    def toggleRightSidebar(self, hide=None, animate=False):
+        """显示或隐藏右侧栏
+        
+        参数:
+            hide: 是否隐藏右侧栏。如果为None，则切换当前状态
+            animate: 是否使用动画效果
+        """
+        # 如果指定了hide参数，则根据参数决定是否隐藏
+        should_hide = hide if hide is not None else self.right_sidebar_expanded
+        
+        # 如果已经在动画中，则不重复触发
+        if hasattr(self, 'right_sidebar_animation') and self.right_sidebar_animation.state() == QPropertyAnimation.Running:
+            return
+        
+        if should_hide:
+            # 隐藏右侧栏
+            if animate:
+                # 使用动画效果
+                self.right_sidebar_animation = QPropertyAnimation(self.right_sidebar, b"maximumWidth")
+                self.right_sidebar_animation.setDuration(200)  # 动画持续时间200ms
+                current_width = self.right_sidebar.width()
+                self.right_sidebar_animation.setStartValue(current_width)
+                self.right_sidebar_animation.setEndValue(0)
+                self.right_sidebar_animation.setEasingCurve(QEasingCurve.InOutQuad)
+                
+                # 确保右侧栏可见性正确
+                self.right_sidebar.setVisible(True)
+                
+                # 动画结束后更新状态
+                self.right_sidebar_animation.finished.connect(lambda: self.finishRightSidebarAnimation(False))
+                
+                # 启动动画
+                self.right_sidebar_animation.start()
+                
+                # 立即更新状态，但不隐藏右侧栏（等动画完成）
+                self.updateRightSidebarState(False)
+                
+                # 更新分割器尺寸
+                sizes = self.main_splitter.sizes()
+                new_sizes = [sizes[0], sizes[1], sizes[2] + sizes[4], sizes[3], 0]
+                self.main_splitter.setSizes(new_sizes)
+            else:
+                # 直接隐藏
+                self.right_sidebar.setMaximumWidth(0)
+                self.right_sidebar.setMinimumWidth(0)
+                self.right_sidebar.setVisible(False)
+                self.updateRightSidebarState(False)
+                
+                # 更新分割器尺寸
+                sizes = self.main_splitter.sizes()
+                new_sizes = [sizes[0], sizes[1], sizes[2] + sizes[4], sizes[3], 0]
+                self.main_splitter.setSizes(new_sizes)
+        else:
+            # 显示右侧栏
+            if animate:
+                # 先设置最大宽度，以便动画可以工作
+                self.right_sidebar.setMaximumWidth(650)
+                self.right_sidebar.setMinimumWidth(0)
+                self.right_sidebar.setVisible(True)
+                
+                # 使用动画效果
+                self.right_sidebar_animation = QPropertyAnimation(self.right_sidebar, b"maximumWidth")
+                self.right_sidebar_animation.setDuration(200)  # 动画持续时间200ms
+                self.right_sidebar_animation.setStartValue(0)
+                self.right_sidebar_animation.setEndValue(650)
+                self.right_sidebar_animation.setEasingCurve(QEasingCurve.InOutQuad)
+                
+                # 动画结束后更新状态
+                self.right_sidebar_animation.finished.connect(lambda: self.finishRightSidebarAnimation(True))
+                
+                # 启动动画
+                self.right_sidebar_animation.start()
+                
+                # 立即更新状态
+                self.updateRightSidebarState(True)
+                
+                # 更新分割器尺寸
+                sizes = self.main_splitter.sizes()
+                if sizes[2] > 650:  # 确保中间区域有足够空间
+                    new_sizes = [sizes[0], sizes[1], sizes[2] - 650, sizes[3], 650]
+                else:  # 如果中间区域空间不足，则按比例分配
+                    total_space = sizes[2]
+                    new_middle = max(int(total_space * 0.4), 100)  # 至少保留100px给中间区域
+                    new_sizes = [sizes[0], sizes[1], new_middle, sizes[3], total_space - new_middle]
+                self.main_splitter.setSizes(new_sizes)
+            else:
+                # 直接显示
+                self.right_sidebar.setFixedWidth(650)  # 固定宽度650px
+                self.right_sidebar.setVisible(True)
+                self.updateRightSidebarState(True)
+                
+                # 更新分割器尺寸
+                sizes = self.main_splitter.sizes()
+                if sizes[2] > 650:  # 确保中间区域有足够空间
+                    new_sizes = [sizes[0], sizes[1], sizes[2] - 650, sizes[3], 650]
+                else:  # 如果中间区域空间不足，则按比例分配
+                    total_space = sizes[2]
+                    new_middle = max(int(total_space * 0.4), 100)  # 至少保留100px给中间区域
+                    new_sizes = [sizes[0], sizes[1], new_middle, sizes[3], total_space - new_middle]
+                self.main_splitter.setSizes(new_sizes)
+                
+    def finishRightSidebarAnimation(self, expanded):
+        """右侧栏动画结束后的处理
+        
+        参数:
+            expanded: 是否展开
+        """
+        if not expanded:
+            # 动画结束后，如果是隐藏状态，则设置不可见以减少资源占用
+            self.right_sidebar.setVisible(False)
+        else:
+            # 如果是显示状态，确保最小宽度也设置好
+            self.right_sidebar.setMinimumWidth(650)
+    
+    def updateRightSidebarState(self, expanded):
+        """更新右侧栏状态
+        
+        参数:
+            expanded: 是否展开
+        """
+        self.right_sidebar_expanded = expanded
+        self.toggle_right_sidebar_btn.setIcon(QIcon(":/images/icons/dropright.svg" if expanded else ":/images/icons/dropleft.svg"))
+        self.toggle_right_sidebar_btn.style().unpolish(self.toggle_right_sidebar_btn)
+        self.toggle_right_sidebar_btn.style().polish(self.toggle_right_sidebar_btn)
 
     def toggleRVizDisplayPanel(self):
         """显示或隐藏RViz的原生显示面板"""
@@ -1693,41 +2017,66 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
             print(f"切换RViz显示面板时出错: {str(e)}")
 
     def updateAttitudeDisplay(self, data=None):
-        """更新姿态指示器显示"""
+        """更新姿态信息显示"""
         try:
-            if hasattr(self, 'attitude_indicator'):
-                # 从话题数据中获取姿态信息，如果没有则模拟生成
-                if self.topic_subscriber and self.topic_subscriber.is_topic_active("attitude"):
-                    # 如果有真实姿态数据，使用真实数据
-                    attitude_data = data if data else self.topic_subscriber.get_latest_data("attitude")
-                    if attitude_data:
-                        # 获取俯仰角并检查是否为列表
-                        pitch_value = attitude_data.get("pitch", 0)
-                        if isinstance(pitch_value, list):
-                            if len(pitch_value) > 0:
-                                pitch_value = pitch_value[0]
-                            else:
-                                pitch_value = 0
-                        self.pitch = pitch_value
-                        
-                        # 获取滚转角并检查是否为列表
-                        roll_value = attitude_data.get("roll", 0)
-                        if isinstance(roll_value, list):
-                            if len(roll_value) > 0:
-                                roll_value = roll_value[0]
-                            else:
-                                roll_value = 0
-                        self.roll = roll_value
-                        
-                        # 更新姿态指示器
+            # 从话题数据中获取姿态信息
+            if self.topic_subscriber and self.topic_subscriber.is_topic_active("attitude"):
+                # 如果有真实姿态数据，使用真实数据
+                attitude_data = data if data else self.topic_subscriber.get_latest_data("attitude")
+                if attitude_data:
+                    # 获取俯仰角并检查是否为列表
+                    pitch_value = attitude_data.get("pitch", 0)
+                    if isinstance(pitch_value, list):
+                        if len(pitch_value) > 0:
+                            pitch_value = pitch_value[0]
+                        else:
+                            pitch_value = 0
+                    self.pitch = pitch_value
+                    
+                    # 获取滚转角并检查是否为列表
+                    roll_value = attitude_data.get("roll", 0)
+                    if isinstance(roll_value, list):
+                        if len(roll_value) > 0:
+                            roll_value = roll_value[0]
+                        else:
+                            roll_value = 0
+                    self.roll = roll_value
+                    
+                    # 获取偏航角
+                    yaw_value = attitude_data.get("yaw", 0)
+                    if isinstance(yaw_value, list):
+                        if len(yaw_value) > 0:
+                            yaw_value = yaw_value[0]
+                        else:
+                            yaw_value = 0
+                    
+                    # 更新姿态标签
+                    if hasattr(self, 'pitch_label'):
+                        self.pitch_label.setText(f"{pitch_value:.2f}°")
+                    if hasattr(self, 'roll_label'):
+                        self.roll_label.setText(f"{roll_value:.2f}°")
+                    if hasattr(self, 'yaw_label'):
+                        self.yaw_label.setText(f"{yaw_value:.2f}°")
+                    
+                    # 保留对姿态指示器的更新，如果还在使用的话
+                    if hasattr(self, 'attitude_indicator'):
                         self.attitude_indicator.update_attitude(self.pitch, self.roll)
-                else:
-                    # 没有实际姿态数据时，将姿态指示器设置为零位
-                    self.pitch = 0
-                    self.roll = 0
+            else:
+                # 没有实际姿态数据时，显示默认值
+                self.pitch = 0
+                self.roll = 0
+                if hasattr(self, 'pitch_label'):
+                    self.pitch_label.setText("0.00°")
+                if hasattr(self, 'roll_label'):
+                    self.roll_label.setText("0.00°")
+                if hasattr(self, 'yaw_label'):
+                    self.yaw_label.setText("0.00°")
+                
+                # 如果姿态指示器还存在，也更新为零位
+                if hasattr(self, 'attitude_indicator'):
                     self.attitude_indicator.update_attitude(self.pitch, self.roll)
         except Exception as e:
-            print(f"更新姿态指示器时出错: {str(e)}")
+            print(f"更新姿态显示时出错: {str(e)}")
             
     def toggleLogWindow(self):
         """显示或隐藏日志窗口"""
@@ -3550,6 +3899,10 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
 
     def setupAllOverlays(self):
         """同时创建所有悬浮窗口组件，确保它们同时显示"""
+        # 暂时禁用鼠标跟踪，避免在创建悬浮窗口时触发左侧栏显示
+        old_enable_state = getattr(self, 'enable_sidebar_hover', False)
+        self.enable_sidebar_hover = False
+        
         # 1. 创建RViz悬浮信息面板
         self.setupRVizOverlay()
         
@@ -3558,6 +3911,9 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         
         # 3. 创建姿态指示器组件
         self.setupAttitudeWidget()
+        
+        # 恢复原来的鼠标跟踪状态
+        self.enable_sidebar_hover = old_enable_state
         
     def handleCloseEvent(self, event):
         """关闭事件处理函数，确保关闭时清理资源"""
@@ -3589,6 +3945,127 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
             
         # 接受关闭事件
         event.accept()
+
+    def autoHideSidebar(self):
+        """启动后自动隐藏左侧栏和右侧栏"""
+        self.toggleSidebar(hide=True, animate=True)
+        self.toggleRightSidebar(hide=True, animate=True)
+        
+    def checkMousePosition(self):
+        """检查鼠标位置，根据位置自动显示或隐藏左右侧栏"""
+        # 如果鼠标跟踪未启用，直接返回
+        if not hasattr(self, 'enable_sidebar_hover') or not self.enable_sidebar_hover:
+            return
+            
+        try:
+            # 获取鼠标当前位置
+            cursor_pos = QCursor.pos()
+            # 将全局坐标转换为窗口坐标
+            local_pos = self.mapFromGlobal(cursor_pos)
+            
+            # 定义左右侧敏感区域宽度
+            sensitivity_width = 20
+            
+            # 获取窗口宽度
+            window_width = self.width()
+            
+            # 检查是否在左侧敏感区域内
+            in_left_sensitive_area = 0 <= local_pos.x() <= sensitivity_width
+            
+            # 检查是否在右侧敏感区域内
+            in_right_sensitive_area = window_width - sensitivity_width <= local_pos.x() <= window_width
+            
+            # 检查是否在窗口内
+            in_window = self.rect().contains(local_pos)
+            
+            # 计算左侧栏区域
+            sidebar_width = self.left_sidebar.width() if self.left_sidebar.isVisible() else 0
+            in_sidebar_area = 0 <= local_pos.x() <= sidebar_width and in_window
+            
+            # 计算右侧栏区域
+            right_sidebar_width = self.right_sidebar.width() if self.right_sidebar.isVisible() else 0
+            in_right_sidebar_area = window_width - right_sidebar_width <= local_pos.x() <= window_width and in_window
+            
+            # 处理左侧栏 - 仅在未固定时进行自动显示/隐藏
+            if not self.left_sidebar_pinned:
+                # 如果鼠标在窗口内的左侧敏感区域，显示左侧栏
+                if in_window and in_left_sensitive_area and not self.sidebar_expanded:
+                    self.toggleSidebar(hide=False, animate=True)
+                
+                # 如果鼠标不在左侧敏感区域且不在左侧栏内，隐藏左侧栏
+                elif self.sidebar_expanded and not in_sidebar_area and not in_left_sensitive_area:
+                    self.toggleSidebar(hide=True, animate=True)
+            
+            # 处理右侧栏 - 仅在未固定时进行自动显示/隐藏
+            if not self.right_sidebar_pinned:
+                # 如果鼠标在窗口内的右侧敏感区域，显示右侧栏
+                if in_window and in_right_sensitive_area and not self.right_sidebar_expanded:
+                    self.toggleRightSidebar(hide=False, animate=True)
+                
+                # 如果鼠标不在右侧敏感区域且不在右侧栏内，隐藏右侧栏
+                elif self.right_sidebar_expanded and not in_right_sidebar_area and not in_right_sensitive_area:
+                    self.toggleRightSidebar(hide=True, animate=True)
+                
+        except Exception as e:
+            print(f"检查鼠标位置时出错: {str(e)}")
+            # 错误时停止定时器以防止继续出错
+            self.sidebar_hover_timer.stop()
+
+    def setupAllOverlaysAndHideSidebar(self):
+        """设置所有悬浮窗口并在完成后隐藏左右侧栏"""
+        # 先设置所有悬浮窗口
+        self.setupAllOverlays()
+        
+        # 延迟500ms后隐藏左右侧栏，确保悬浮窗口已完全显示
+        QTimer.singleShot(500, self.finalizeStartup)
+    
+    def finalizeStartup(self):
+        """完成启动过程，隐藏左右侧栏并启用鼠标跟踪"""
+        # 隐藏左侧栏和右侧栏
+        self.toggleSidebar(hide=True, animate=True)
+        self.toggleRightSidebar(hide=True, animate=True)
+        
+        # 确保两侧的固定状态为未固定
+        self.left_sidebar_pinned = False
+        self.right_sidebar_pinned = False
+        
+        # 恢复按钮样式为默认
+        self.toggle_sidebar_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #1A202C;
+                border: none;
+                border-radius: 0;
+                padding: 2px;
+            }
+            QPushButton:hover {
+                background-color: #3498DB;
+            }
+            QPushButton:pressed {
+                background-color: #2980B9;
+            }
+        """)
+        self.toggle_right_sidebar_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #1A202C;
+                border: none;
+                border-radius: 0;
+                padding: 2px;
+            }
+            QPushButton:hover {
+                background-color: #3498DB;
+            }
+            QPushButton:pressed {
+                background-color: #2980B9;
+            }
+        """)
+        
+        # 延迟300ms后启用鼠标跟踪，避免动画过程中触发鼠标跟踪
+        QTimer.singleShot(300, self.enableMouseTracking)
+    
+    def enableMouseTracking(self):
+        """启用鼠标跟踪"""
+        self.enable_sidebar_hover = True
+        print("鼠标跟踪已启用")
 
 ## Start the Application
 ## ^^^^^^^^^^^^^^^^^^^^^
