@@ -485,7 +485,7 @@ class UIButton(QWidget):
         font = QFont("WenQuanYi Micro Hei", 8)
         # 位置调整，使文字在扇形中央
         textX = radius1 * 0.24
-        textY = radius1 * 0.048
+        textY = radius1 * 0.045
         textPath.addText(textX, textY, font, self.rightText)
         
         # 绘制图形和文字
@@ -571,7 +571,7 @@ class UIButton(QWidget):
         font = QFont("WenQuanYi Micro Hei", 8)
         # 位置调整，使文字在扇形中央
         textX = -radius1 * 0.48
-        textY = radius1 * 0.048
+        textY = radius1 * 0.045
         textPath.addText(textX, textY, font, self.leftText)
       
         # 绘制小扇形
