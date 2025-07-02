@@ -1490,6 +1490,18 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
             # 计算合成速度(cm/s)
             speed = velocity_data.get("speed", 0.0)
             
+            # 检查NaN值并替换为0
+            if math.isnan(speed):
+                speed = 0.0
+                
+            # 检查线性速度分量是否为NaN
+            if math.isnan(linear_x):
+                linear_x = 0.0
+            if math.isnan(linear_y):
+                linear_y = 0.0
+            if math.isnan(linear_z):
+                linear_z = 0.0
+            
             # 保存速度数据以便在模拟模式下使用
             self.speed = int(speed)
             self.linear_speed = math.sqrt(linear_x**2 + linear_y**2)  # 地面速度
@@ -2144,8 +2156,8 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
                 process = subprocess.Popen(cmd1, shell=True, stdout=log_file, stderr=log_file, 
                                         executable='/bin/bash', text=True)
             
-            # 等待5秒，检查初期启动情况
-            timeout = 5  # 5秒超时检查
+            # 等待40秒，确保所有节点启动完成
+            timeout = 40  # 增加到40秒等待，与run.sh中的累计睡眠时间一致
             start_time = time.time()
             
             # 非阻塞方式检查进程是否已结束
@@ -2161,24 +2173,33 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
                         return
                     break
                     
-                # 更新进度条
-                progress = int(10 + min(40, (time.time() - start_time) / timeout * 40))
+                # 更新进度条 - 在40秒内从10%逐步增加到50%
+                elapsed = time.time() - start_time
+                progress = int(10 + min(40, (elapsed / timeout * 40)))
                 progress_dialog.setValue(progress)
+                
+                # 显示更有用的信息，包括剩余等待时间
+                remaining = max(0, int(timeout - elapsed))
+                progress_dialog.setLabelText(f"正在启动主系统...（还需等待约{remaining}秒）")
+                
                 QApplication.processEvents()
-                time.sleep(0.1)
+                time.sleep(0.5)  # 增加sleep间隔，减少UI更新频率
+            
+            # 无论脚本是否返回，都继续执行（run.sh是以后台方式运行各个节点的）
+            print("已启动run.sh脚本，将等待其后台完成各节点启动")
             
             # 设置一个定时器检查进程是否在后续运行中出错
             self.check_process_timer = QTimer()
             self.check_process_timer.timeout.connect(lambda: self.checkProcessStatus(process, "主系统"))
-            self.check_process_timer.start(2000)  # 每2秒检查一次
+            self.check_process_timer.start(5000)  # 每5秒检查一次
             
             # 继续执行，第一个脚本已经正常启动
             progress_dialog.setValue(50)
             progress_dialog.setLabelText("启动位姿转换模块...")
             QApplication.processEvents()
             
-            # 延迟启动第二个进程
-            QTimer.singleShot(5000, lambda: self.startSecondProcess(progress_dialog))
+            # 延迟启动第二个进程 - 给run.sh额外的10秒时间完成启动
+            QTimer.singleShot(10000, lambda: self.startSecondProcess(progress_dialog))
             
         except Exception as e:
             QMessageBox.critical(self, "启动错误", f"启动无人机系统时出错: {str(e)}")
@@ -3183,8 +3204,8 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
             
             # 设置单元格值
             self.position_table.setItem(row_position, 0, QTableWidgetItem(str(ball_id)))
-            self.position_table.setItem(row_position, 1, QTableWidgetItem(f"{x:.2f m}"))
-            self.position_table.setItem(row_position, 2, QTableWidgetItem(f"{y:.2f m}"))
+            self.position_table.setItem(row_position, 1, QTableWidgetItem(f"{x:.2f} m"))
+            self.position_table.setItem(row_position, 2, QTableWidgetItem(f"{y:.2f} m"))
             
             # 设置状态为"待确认"
             status_item = QTableWidgetItem("待确认")
@@ -4112,9 +4133,39 @@ def check_and_start_roscore():
         print(f"检查或启动roscore时出错: {str(e)}")
         return False
 
+def set_serial_permissions():
+    """设置串口设备权限，使用sudo chmod 777 /dev/ttyACM0，密码为1"""
+    try:
+        import subprocess
+        
+        print("正在设置串口设备权限...")
+        # 执行sudo命令修改/dev/ttyACM0的权限，通过管道提供密码
+        process = subprocess.Popen(
+            ['sudo', '-S', 'chmod', '777', '/dev/ttyACM0'], 
+            stdin=subprocess.PIPE,
+            stdout=subprocess.PIPE, 
+            stderr=subprocess.PIPE,
+            universal_newlines=True
+        )
+        
+        # 提供管理员密码"1"
+        stdout, stderr = process.communicate(input="1\n")
+        
+        if process.returncode == 0:
+            print("串口设备权限设置成功")
+            return True
+        else:
+            print(f"设置串口设备权限失败，错误信息: {stderr}")
+            return False
+    except Exception as e:
+        print(f"设置串口设备权限时出错: {str(e)}")
+        return False
+
 
 
 if __name__ == '__main__':
+    # 设置串口权限
+    set_serial_permissions()
     
     app = QApplication(sys.argv)
     

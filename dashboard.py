@@ -900,11 +900,10 @@ class AttitudeIndicatorWidget(QWidget):
                                        Qt.KeepAspectRatio, Qt.SmoothTransformation)
             
             # 根据俯仰角移动背景（地平线效果）
-            painter.drawPixmap(
-                -scaled_bg.width() / 2, 
-                -scaled_bg.height() / 2 + pitch_pixels,
-                scaled_bg
-            )
+            # 将浮点坐标转换为整数
+            x_pos = int(-scaled_bg.width() / 2)
+            y_pos = int(-scaled_bg.height() / 2 + pitch_pixels)
+            painter.drawPixmap(x_pos, y_pos, scaled_bg)
         
         # 恢复旋转前状态，用于绘制固定的前景层
         painter.restore()
@@ -915,9 +914,9 @@ class AttitudeIndicatorWidget(QWidget):
             scaled_fg = self.fg_image.scaled(fg_size, fg_size, 
                                        Qt.KeepAspectRatio, Qt.SmoothTransformation)
             
-            # 居中显示前景图
-            x_offset = (self.size - scaled_fg.width()) / 2
-            y_offset = (self.size - scaled_fg.height()) / 2
+            # 居中显示前景图，转换坐标为整数
+            x_offset = int((self.size - scaled_fg.width()) / 2)
+            y_offset = int((self.size - scaled_fg.height()) / 2)
             painter.drawPixmap(x_offset, y_offset, scaled_fg)
     
     def sizeHint(self):
@@ -983,9 +982,9 @@ class CompassWidget(QWidget):
             scaled_bg = self.compass_bg.scaled(bg_size, bg_size, 
                                            Qt.KeepAspectRatio, Qt.SmoothTransformation)
             
-            # 计算居中位置
-            x_offset = (self.size - scaled_bg.width()) / 2
-            y_offset = (self.size - scaled_bg.height()) / 2
+            # 计算居中位置，确保为整数
+            x_offset = int((self.size - scaled_bg.width()) / 2)
+            y_offset = int((self.size - scaled_bg.height()) / 2)
             painter.drawPixmap(x_offset, y_offset, scaled_bg)
         
         # 绘制朝向文本
@@ -1010,9 +1009,9 @@ class CompassWidget(QWidget):
             scaled_needle = self.needle.scaled(needle_size, needle_size, 
                                           Qt.KeepAspectRatio, Qt.SmoothTransformation)
             
-            # 计算指针位置偏移，使针尾在中心点
-            pointer_x_offset = -scaled_needle.width() / 2
-            pointer_y_offset = -scaled_needle.height() / 2
+            # 计算指针位置偏移，使针尾在中心点，确保为整数
+            pointer_x_offset = int(-scaled_needle.width() / 2)
+            pointer_y_offset = int(-scaled_needle.height() / 2)
             
             # 绘制指针，确保正确放置
             painter.drawPixmap(pointer_x_offset, pointer_y_offset, scaled_needle)
