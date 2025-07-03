@@ -22,6 +22,7 @@ env/
 .coverage
 htmlcov/
 .pytest_cache/
+screenshots/
 
 # 构建和分发目录
 build/

@@ -987,11 +987,13 @@ class CompassWidget(QWidget):
             y_offset = int((self.size - scaled_bg.height()) / 2)
             painter.drawPixmap(x_offset, y_offset, scaled_bg)
         
-        # 绘制朝向文本
+        # 绘制朝向文本，保留正负号
         painter.setFont(QFont("Arial", 18, QFont.Bold))
         painter.setPen(QPen(QColor("#3498DB")))
+        # 格式化角度显示，保留正负号
+        heading_text = f"{int(self.heading)}°"
         painter.drawText(QRect(0, 0, self.size, self.size), 
-                         Qt.AlignCenter, f"{int(self.heading)}°")
+                         Qt.AlignCenter, heading_text)
         
         # 绘制旋转的指针 - 确保指针指向顶部
         if not self.needle.isNull():
@@ -1000,9 +1002,9 @@ class CompassWidget(QWidget):
             # 移动到中心点
             painter.translate(center_x, center_y)
             
-            # 旋转画布，将指针放在顶部（-90度），再加上航向角度
-            # 注意航向是顺时针方向，而Qt旋转是逆时针，所以用负值
-            painter.rotate(self.heading + 1)  # -90度调整确保指针默认指向顶部
+            # 旋转画布，考虑到原始yaw值的方向和范围
+            # 直接使用航向角度，注意Qt的旋转方向是逆时针的
+            painter.rotate(self.heading+1)  # 负号确保正确的旋转方向
             
             # 缩放指针图像
             needle_size = self.size * 1.25  # 适当缩小指针尺寸

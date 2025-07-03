@@ -93,6 +93,10 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         font = QFont("WenQuanYi Micro Hei", 10)
         QApplication.setFont(font)
         
+        # 设置应用图标
+        icon = QIcon("logo.png")
+        self.setWindowIcon(icon)
+        
         # 图像显示相关变量
         self.camera_image = None
         self.depth_image = None
@@ -118,7 +122,7 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         }
         
         # 添加关闭事件处理
-        self.closeEvent = self.handleCloseEvent
+        # 正确设置关闭事件处理
         
         # 设置窗口标题
         self.setWindowTitle("无人机自主搜索系统")
@@ -468,7 +472,7 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         battery_status_desc = QLabel("电池状态:")
         battery_status_desc.setStyleSheet(label_style)
         status_grid_layout.addWidget(battery_status_desc, row, 2)
-        self.battery_status_label = QLabel(f"{self.battery_percentage:.1f}% ({self.battery_voltage:.2f}V)")
+        self.battery_status_label = QLabel(f"{self.battery_percentage:.1f}%")
         self.battery_status_label.setStyleSheet(value_style)
         status_grid_layout.addWidget(self.battery_status_label, row, 3)
         
@@ -893,8 +897,10 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         
         # 创建位置信息表格
         self.position_table = QTableWidget()
-        self.position_table.setColumnCount(4)
-        self.position_table.setHorizontalHeaderLabels(["ID", "X坐标", "Y坐标", "状态"])
+        self.position_table.setColumnCount(5)  # 增加一列用于截图
+        self.position_table.setHorizontalHeaderLabels(["ID", "X坐标", "Y坐标", "状态", "截图"])
+        # 添加表格单元格点击事件
+        self.position_table.cellClicked.connect(self.on_position_table_cell_clicked)
         self.position_table.setStyleSheet("""
             QTableWidget {
                 background-color: #1E2330;
@@ -1224,6 +1230,17 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         
         # 程序启动时自动初始化话题订阅器，无需等待点击一键启动按钮
         QTimer.singleShot(2000, self.setupTopicSubscriber)  # 延迟2秒初始化订阅器，确保界面已完全加载
+        
+        # 初始化话题订阅器变量，但不启动订阅（在__init__末尾会自动订阅）
+        self.topic_subscriber = None
+        
+        # 用于存储小球截图的字典 {ball_id: {"image": cv_image, "path": 文件路径}}
+        self.ball_screenshots = {}
+        
+        # 确保截图存储目录存在
+        self.screenshots_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "screenshots")
+        if not os.path.exists(self.screenshots_dir):
+            os.makedirs(self.screenshots_dir)
     
     def toggleDisplayPanel(self):
         """此方法已不再使用，保留以避免可能的引用错误"""
@@ -2062,13 +2079,13 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
                         else:
                             yaw_value = 0
                     
-                    # 更新姿态标签
+                    # 更新姿态标签 - 使用原始偏航角值
                     if hasattr(self, 'pitch_label'):
                         self.pitch_label.setText(f"{pitch_value:.2f}°")
                     if hasattr(self, 'roll_label'):
                         self.roll_label.setText(f"{roll_value:.2f}°")
                     if hasattr(self, 'yaw_label'):
-                        self.yaw_label.setText(f"{yaw_value:.2f}°")
+                        self.yaw_label.setText(f"{-yaw_value:.2f}°")
                     
                     # 保留对姿态指示器的更新，如果还在使用的话
                     if hasattr(self, 'attitude_indicator'):
@@ -2141,69 +2158,197 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
             fast_drone_ws = os.path.expanduser("~/GUET_UAV_Drone_v2")
             zyc_fuel_ws = os.path.expanduser("~/zyc_fuel_ws")
             
-            # 后台启动第一个程序 - 使用同步执行方式
-            progress_dialog.setLabelText("正在启动主系统...")
-            progress_dialog.setValue(10)
-            QApplication.processEvents()
-            
-            # 创建日志文件
+            # 创建主系统日志文件
             main_system_log = f"{log_dir}/main_system_{timestamp}.log"
             self.log_files = {"main_system": main_system_log}
             print(f"主系统日志文件: {main_system_log}")
             
-            cmd1 = f"cd {fast_drone_ws} && source {fast_drone_ws}/devel/setup.bash && sh shfiles/run.sh"
-            with open(main_system_log, 'w') as log_file:
-                process = subprocess.Popen(cmd1, shell=True, stdout=log_file, stderr=log_file, 
-                                        executable='/bin/bash', text=True)
+            # 保存所有进程的引用
+            self.processes = {}
             
-            # 等待40秒，确保所有节点启动完成
-            timeout = 40  # 增加到40秒等待，与run.sh中的累计睡眠时间一致
-            start_time = time.time()
-            
-            # 非阻塞方式检查进程是否已结束
-            while time.time() - start_time < timeout:
-                returncode = process.poll()
-                if returncode is not None:  # 进程已结束
-                    if returncode != 0:
-                        # 获取错误输出
-                        _, stderr = process.communicate()
-                        error_msg = f"启动无人机系统失败，返回代码: {returncode}\n\n错误信息:\n{stderr[:500]}..."
-                        QMessageBox.critical(self, "启动错误", error_msg)
-                        progress_dialog.close()
-                        return
-                    break
-                    
-                # 更新进度条 - 在40秒内从10%逐步增加到50%
-                elapsed = time.time() - start_time
-                progress = int(10 + min(40, (elapsed / timeout * 40)))
-                progress_dialog.setValue(progress)
-                
-                # 显示更有用的信息，包括剩余等待时间
-                remaining = max(0, int(timeout - elapsed))
-                progress_dialog.setLabelText(f"正在启动主系统...（还需等待约{remaining}秒）")
-                
-                QApplication.processEvents()
-                time.sleep(0.5)  # 增加sleep间隔，减少UI更新频率
-            
-            # 无论脚本是否返回，都继续执行（run.sh是以后台方式运行各个节点的）
-            print("已启动run.sh脚本，将等待其后台完成各节点启动")
-            
-            # 设置一个定时器检查进程是否在后续运行中出错
-            self.check_process_timer = QTimer()
-            self.check_process_timer.timeout.connect(lambda: self.checkProcessStatus(process, "主系统"))
-            self.check_process_timer.start(5000)  # 每5秒检查一次
-            
-            # 继续执行，第一个脚本已经正常启动
-            progress_dialog.setValue(50)
-            progress_dialog.setLabelText("启动位姿转换模块...")
+            # 第1步：设置串口权限
+            progress_dialog.setLabelText("正在设置串口权限...")
+            progress_dialog.setValue(5)
             QApplication.processEvents()
             
-            # 延迟启动第二个进程 - 给run.sh额外的10秒时间完成启动
-            QTimer.singleShot(10000, lambda: self.startSecondProcess(progress_dialog))
+            with open(main_system_log, 'w') as log_file:
+                cmd_chmod = "sudo chmod 777 /dev/ttyACM0"
+                process_chmod = subprocess.Popen(cmd_chmod, shell=True, stdout=log_file, stderr=log_file, 
+                                        executable='/bin/bash', text=True)
+                process_chmod.wait(timeout=3)  # 等待权限设置完成
+                log_file.write("\n\n--- 设置串口权限完成 ---\n\n")
+            
+            # 第2步：启动RealSense相机
+            progress_dialog.setLabelText("正在启动RealSense相机...")
+            progress_dialog.setValue(10)
+            QApplication.processEvents()
+            
+            rs_camera_log = f"{log_dir}/rs_camera_{timestamp}.log"
+            self.log_files["rs_camera"] = rs_camera_log
+            
+            with open(rs_camera_log, 'w') as log_file:
+                cmd_camera = f"cd {fast_drone_ws} && source {fast_drone_ws}/devel/setup.bash && roslaunch realsense2_camera rs_camera.launch"
+                process_camera = subprocess.Popen(cmd_camera, shell=True, stdout=log_file, stderr=log_file, 
+                                        executable='/bin/bash', text=True)
+                self.processes["camera"] = process_camera
+            
+            # 等待5秒确保相机启动
+            time.sleep(5)
+            progress_dialog.setValue(20)
+            QApplication.processEvents()
+            
+            # 第3步：启动MAVROS
+            progress_dialog.setLabelText("正在启动MAVROS...")
+            progress_dialog.setValue(25)
+            QApplication.processEvents()
+            
+            mavros_log = f"{log_dir}/mavros_{timestamp}.log"
+            self.log_files["mavros"] = mavros_log
+            
+            with open(mavros_log, 'w') as log_file:
+                cmd_mavros = f"cd {fast_drone_ws} && source {fast_drone_ws}/devel/setup.bash && roslaunch mavros px4.launch"
+                process_mavros = subprocess.Popen(cmd_mavros, shell=True, stdout=log_file, stderr=log_file, 
+                                        executable='/bin/bash', text=True)
+                self.processes["mavros"] = process_mavros
+            
+            # 等待5秒确保MAVROS启动
+            time.sleep(5)
+            progress_dialog.setValue(35)
+            QApplication.processEvents()
+            
+            # 第4步：设置MAVROS参数
+            progress_dialog.setLabelText("正在配置MAVROS参数...")
+            progress_dialog.setValue(40)
+            QApplication.processEvents()
+            
+            with open(mavros_log, 'a') as log_file:
+                # 设置第一个参数
+                cmd_param1 = f"cd {fast_drone_ws} && source {fast_drone_ws}/devel/setup.bash && rosrun mavros mavcmd long 511 105 5000 0 0 0 0 0"
+                process_param1 = subprocess.Popen(cmd_param1, shell=True, stdout=log_file, stderr=log_file, 
+                                        executable='/bin/bash', text=True)
+                process_param1.wait(timeout=3)  # 等待命令完成
+                log_file.write("\n\n--- 参数1设置完成 ---\n\n")
+                
+                # 设置第二个参数
+                cmd_param2 = f"cd {fast_drone_ws} && source {fast_drone_ws}/devel/setup.bash && rosrun mavros mavcmd long 511 31 5000 0 0 0 0 0"
+                process_param2 = subprocess.Popen(cmd_param2, shell=True, stdout=log_file, stderr=log_file, 
+                                        executable='/bin/bash', text=True)
+                process_param2.wait(timeout=3)  # 等待命令完成
+                log_file.write("\n\n--- 参数2设置完成 ---\n\n")
+            
+            # 第5步：启动VINS
+            progress_dialog.setLabelText("正在启动VINS视觉惯性系统...")
+            progress_dialog.setValue(45)
+            QApplication.processEvents()
+            
+            vins_log = f"{log_dir}/vins_{timestamp}.log"
+            self.log_files["vins"] = vins_log
+            
+            with open(vins_log, 'w') as log_file:
+                cmd_vins = f"cd {fast_drone_ws} && source {fast_drone_ws}/devel/setup.bash && roslaunch vins fast_drone_250.launch"
+                process_vins = subprocess.Popen(cmd_vins, shell=True, stdout=log_file, stderr=log_file, 
+                                        executable='/bin/bash', text=True)
+                self.processes["vins"] = process_vins
+            
+            # 等待5秒确保VINS启动
+            time.sleep(5)
+            progress_dialog.setValue(55)
+            QApplication.processEvents()
+            
+            # 第6步：启动目标检测器
+            progress_dialog.setLabelText("正在启动目标检测系统...")
+            progress_dialog.setValue(60)
+            QApplication.processEvents()
+            
+            detector_log = f"{log_dir}/detector_{timestamp}.log"
+            self.log_files["detector"] = detector_log
+            
+            with open(detector_log, 'w') as log_file:
+                cmd_detector = f"cd {fast_drone_ws} && source {fast_drone_ws}/devel/setup.bash && roslaunch onboard_detector run_detector.launch"
+                process_detector = subprocess.Popen(cmd_detector, shell=True, stdout=log_file, stderr=log_file, 
+                                        executable='/bin/bash', text=True)
+                self.processes["detector"] = process_detector
+            
+            # 等待3秒确保检测器启动
+            time.sleep(3)
+            progress_dialog.setValue(70)
+            QApplication.processEvents()
+            
+            # 第7步：启动PX4控制器
+            progress_dialog.setLabelText("正在启动飞控系统...")
+            progress_dialog.setValue(75)
+            QApplication.processEvents()
+            
+            px4ctrl_log = f"{log_dir}/px4ctrl_{timestamp}.log"
+            self.log_files["px4ctrl"] = px4ctrl_log
+            
+            with open(px4ctrl_log, 'w') as log_file:
+                cmd_px4ctrl = f"cd {fast_drone_ws} && source {fast_drone_ws}/devel/setup.bash && roslaunch px4ctrl run_ctrl.launch"
+                process_px4ctrl = subprocess.Popen(cmd_px4ctrl, shell=True, stdout=log_file, stderr=log_file, 
+                                        executable='/bin/bash', text=True)
+                self.processes["px4ctrl"] = process_px4ctrl
+            
+            # 等待2秒确保PX4控制器启动
+            time.sleep(2)
+            progress_dialog.setValue(85)
+            QApplication.processEvents()
+            
+            # 第8步：启动Ego规划器
+            progress_dialog.setLabelText("正在启动路径规划系统...")
+            progress_dialog.setValue(90)
+            QApplication.processEvents()
+            
+            planner_log = f"{log_dir}/planner_{timestamp}.log"
+            self.log_files["planner"] = planner_log
+            
+            with open(planner_log, 'w') as log_file:
+                cmd_planner = f"cd {fast_drone_ws} && source {fast_drone_ws}/devel/setup.bash && roslaunch ego_planner single_run_in_exp.launch"
+                process_planner = subprocess.Popen(cmd_planner, shell=True, stdout=log_file, stderr=log_file, 
+                                        executable='/bin/bash', text=True)
+                self.processes["planner"] = process_planner
+            
+            # 设置定时器监视所有进程状态
+            self.process_monitor_timer = QTimer()
+            self.process_monitor_timer.timeout.connect(self.monitorAllProcesses)
+            self.process_monitor_timer.start(5000)  # 每5秒检查一次所有进程
+            
+            # 更新进度
+            progress_dialog.setValue(95)
+            progress_dialog.setLabelText("正在启动位姿转换模块...")
+            QApplication.processEvents()
+            
+            # 延迟启动第二个主要进程
+            QTimer.singleShot(2000, lambda: self.startSecondProcess(progress_dialog))
             
         except Exception as e:
             QMessageBox.critical(self, "启动错误", f"启动无人机系统时出错: {str(e)}")
-            
+    
+    def monitorAllProcesses(self):
+        """监视所有启动的进程状态"""
+        try:
+            if not hasattr(self, 'processes'):
+                return
+                
+            for name, process in self.processes.items():
+                if process is None:
+                    continue
+                    
+                returncode = process.poll()
+                if returncode is not None and returncode != 0:
+                    # 进程已异常退出
+                    try:
+                        _, stderr = process.communicate(timeout=0.5)
+                    except Exception:
+                        stderr = "无法获取错误输出"
+                        
+                    error_msg = f"{name}进程异常终止，返回代码: {returncode}\n\n错误信息:\n{stderr[:500]}..."
+                    QMessageBox.warning(self, "进程异常", error_msg)
+                    
+                    # 将进程标记为None，避免重复报警
+                    self.processes[name] = None
+        except Exception as e:
+            print(f"监视进程时出错: {str(e)}")
+
     def checkProcessStatus(self, process, process_name):
         """检查进程状态，如果异常终止则显示错误"""
         try:
@@ -2376,7 +2521,42 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
                 self.topic_subscriber.shutdown()
                 self.topic_subscriber = None
             
-
+            # 重置话题数据状态标志
+            self.topics_with_data = {
+                "battery": False,
+                "status": False,
+                "odometry": False,
+                "velocity": False,
+                "camera": False,
+                "depth": False,
+                "bird_view": False,
+                "marker": False
+            }
+            
+            # 重置相关UI元素显示状态
+            # 如果有电池状态显示，重置为初始状态
+            if hasattr(self, 'battery_progress'):
+                self.battery_progress.setValue(0)
+                self.battery_percentage.setText("---%")
+                self.battery_voltage.setText("--.- V")
+            
+            # 如果有位置显示，重置为初始状态
+            if hasattr(self, 'position_value'):
+                self.position_value.setText("x: ---m, y: ---m, z: ---m")
+            
+            # 如果有速度显示，重置为初始状态
+            if hasattr(self, 'velocity_value'):
+                self.velocity_value.setText("---m/s")
+                
+            # 如果有状态显示，重置为初始状态
+            if hasattr(self, 'status_value'):
+                self.status_value.setText("未连接")
+                
+            # 如果有相机图像显示，清空图像
+            if hasattr(self, 'camera_image'):
+                self.camera_image = None
+                if hasattr(self, 'image_label'):
+                    self.image_label.setText("等待图像数据...")
                 
             # 创建新的订阅器
             self.topic_subscriber = TopicsSubscriber()
@@ -3212,12 +3392,56 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
             status_item.setForeground(QBrush(QColor("#F39C12")))  # 橙色
             self.position_table.setItem(row_position, 3, status_item)
             
+            # 添加截图按钮
+            screenshot_item = QTableWidgetItem("查看截图")
+            screenshot_item.setForeground(QBrush(QColor("#2980B9")))  # 蓝色
+            self.position_table.setItem(row_position, 4, screenshot_item)
+            
+            # 拍摄小球截图
+            self.capture_ball_screenshot(ball_id)
+            
             print(f"已添加标记点到表格: ID={ball_id}, X={x:.2f}, Y={y:.2f}, Z={z:.2f}")
             
             # 自动滚动到新添加的行
             self.position_table.scrollToItem(self.position_table.item(row_position, 0))
         except Exception as e:
             print(f"添加标记点到表格时出错: {str(e)}")
+            
+    def capture_ball_screenshot(self, ball_id):
+        """拍摄小球截图并保存"""
+        try:
+            # 确保有话题订阅器且相机图像可用
+            if not self.topic_subscriber or not hasattr(self.topic_subscriber, "get_data"):
+                print("话题订阅器未初始化，无法拍摄截图")
+                return
+                
+            # 获取当前相机图像
+            camera_data = self.topic_subscriber.get_data("camera")
+            if not camera_data or "image" not in camera_data or camera_data["image"] is None:
+                print("相机图像未获取，无法拍摄截图")
+                return
+                
+            # 复制图像以避免引用问题
+            image_copy = camera_data["image"].copy()
+            
+            # 保存图像到文件
+            timestamp = int(time.time())
+            filename = f"ball_{ball_id}_{timestamp}.jpg"
+            filepath = os.path.join(self.screenshots_dir, filename)
+            
+            # 保存截图
+            cv2.imwrite(filepath, image_copy)
+            
+            # 存储截图信息
+            self.ball_screenshots[ball_id] = {
+                "image": image_copy,
+                "path": filepath,
+                "timestamp": timestamp
+            }
+            
+            print(f"已为小球ID {ball_id} 拍摄并保存截图: {filepath}")
+        except Exception as e:
+            print(f"拍摄小球截图时出错: {str(e)}")
 
     def stopDroneSystem(self):
         """停止无人机系统"""
@@ -3230,7 +3454,7 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
                 return
                 
             # 立即停止所有进程监控定时器，避免重复弹出错误消息
-            for timer_attr in ['check_process_timer', 'check_process2_timer', 'check_process3_timer']:
+            for timer_attr in ['check_process_timer', 'check_process2_timer', 'check_process3_timer', 'process_monitor_timer']:
                 if hasattr(self, timer_attr):
                     timer = getattr(self, timer_attr)
                     if timer and timer.isActive():
@@ -3262,175 +3486,284 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
                 progress_dialog.setValue(30)
                 QApplication.processEvents()
             
-            # 进度条继续
-            progress_dialog.setValue(38)
-            QApplication.processEvents()
-
-            # 使用已存在的停止脚本
-            script_path = "/home/togan/zyc_fuel_ws/scripts/stop.sh"
-            progress_dialog.setLabelText("正在终止ROS节点(保留roscore)...")
-            progress_dialog.setValue(40)
+            # 逐个关闭之前启动的进程
+            if hasattr(self, 'processes') and self.processes:
+                total_processes = len([p for p in self.processes.values() if p is not None])
+                progress_per_process = 50 / max(total_processes, 1)  # 在30%-80%的进度范围内分配
+                current_progress = 30
+                
+                # 按照启动的相反顺序终止进程
+                process_order = ["planner", "px4ctrl", "detector", "vins", "mavros", "camera"]
+                
+                for process_name in process_order:
+                    if process_name in self.processes and self.processes[process_name]:
+                        progress_dialog.setLabelText(f"正在停止{process_name}进程...")
+                        progress_dialog.setValue(int(current_progress))
+                        QApplication.processEvents()
+                        
+                        try:
+                            # 终止进程
+                            self.processes[process_name].terminate()
+                            # 给进程一点时间自行退出
+                            start_time = time.time()
+                            while time.time() - start_time < 2:  # 最多等待2秒
+                                if self.processes[process_name].poll() is not None:
+                                    # 进程已结束
+                                    break
+                                time.sleep(0.1)
+                            
+                            # 如果进程仍未退出，强制杀死
+                            if self.processes[process_name].poll() is None:
+                                self.processes[process_name].kill()
+                            
+                            # 等待进程完全退出
+                            self.processes[process_name].wait(timeout=1)
+                            print(f"已停止{process_name}进程")
+                        except Exception as e:
+                            print(f"停止{process_name}进程时出错: {str(e)}")
+                        
+                        current_progress += progress_per_process
+                
+                # 清空进程列表
+                self.processes = {}
+                
+                progress_dialog.setValue(60)
+                QApplication.processEvents()
+            
+            # 使用强大的终止机制，确保所有相关进程都被终止
+            progress_dialog.setLabelText("正在终止所有相关进程...")
+            progress_dialog.setValue(70)
             QApplication.processEvents()
             
-            # 执行脚本并实时更新进度
-            try:
-                # 修改环境变量，通知脚本保留roscore运行
-                env = os.environ.copy()
-                env["PRESERVE_ROSCORE"] = "1"  # 设置环境变量，告知脚本保留roscore
-                
-                # 使用带进度展示的方式执行脚本
-                process = subprocess.Popen(['bash', script_path], 
-                                          stdout=subprocess.PIPE, 
-                                          stderr=subprocess.PIPE,
-                                          text=True,  # 确保输出是文本格式
-                                          bufsize=1,  # 行缓冲
-                                          env=env)   # 传递修改后的环境变量
-                
-                # 准备收集输出
-                all_output = []
-                all_errors = []
-                
-                # 创建一个非阻塞读取输出的函数
-                def read_output():
-                    # 使用非阻塞方式从stdout读取
-                    import select
-                    
-                    # 设置文件描述符为非阻塞模式
-                    import fcntl
-                    import os
-                    
-                    # 获取文件描述符
-                    stdout_fd = process.stdout.fileno()
-                    stderr_fd = process.stderr.fileno()
-                    
-                    # 设置非阻塞标志
-                    fl = fcntl.fcntl(stdout_fd, fcntl.F_GETFL)
-                    fcntl.fcntl(stdout_fd, fcntl.F_SETFL, fl | os.O_NONBLOCK)
-                    
-                    fl = fcntl.fcntl(stderr_fd, fcntl.F_GETFL)
-                    fcntl.fcntl(stderr_fd, fcntl.F_SETFL, fl | os.O_NONBLOCK)
-                    
-                    has_data = False
-                    
-                    # 使用select检查是否有数据可读，超时0.1秒
-                    readable, _, _ = select.select([stdout_fd, stderr_fd], [], [], 0.1)
-                    
-                    # 读取stdout
-                    if stdout_fd in readable:
-                        try:
-                            # 读一行或者最多4096字节
-                            stdout_data = process.stdout.readline()
-                            if stdout_data:
-                                all_output.append(stdout_data)
-                                # 更新进度对话框状态
-                                cur_progress = min(40 + len(all_output) * 2, 90)  # 最大到90%
-                                progress_dialog.setValue(cur_progress)
-                                progress_dialog.setLabelText(f"正在停止: {stdout_data.strip()[:50]}")
-                                has_data = True
-                        except (IOError, BrokenPipeError) as e:
-                            print(f"读取stdout时出错: {str(e)}")
-                    
-                    # 读取stderr
-                    if stderr_fd in readable:
-                        try:
-                            # 读一行或者最多4096字节
-                            stderr_data = process.stderr.readline()
-                            if stderr_data:
-                                all_errors.append(stderr_data)
-                                has_data = True
-                        except (IOError, BrokenPipeError) as e:
-                            print(f"读取stderr时出错: {str(e)}")
-                    
-                    return has_data
-                
-                # 添加超时机制
-                start_time = time.time()
-                timeout = 15  # 设置最大超时时间为15秒
-                
-                # 非阻塞方式读取输出，带超时检测
-                while process.poll() is None:
-                    # 检查是否超时
-                    if time.time() - start_time > timeout:
-                        print("停止进程执行超时，强制终止...")
-                        process.terminate()  # 先尝试温和终止
-                        time.sleep(0.5)
-                        if process.poll() is None:  # 如果还没结束
-                            process.kill()  # 强制终止
-                            print("已强制终止停止脚本进程")
-                        break
-                    
-                    # 读取输出
-                    if not read_output():
-                        time.sleep(0.1)
-                    QApplication.processEvents()
-                
-                # 尝试读取剩余输出，但也加入超时保护
-                read_timeout = time.time() + 2  # 最多再读2秒
-                while time.time() < read_timeout and read_output():
-                    QApplication.processEvents()
-                    pass
-                
-                # 处理完毕，准备显示结果
-                stdout = "".join(all_output)
-                stderr = "".join(all_errors)
-                
-                # 更新进度到100%
-                progress_dialog.setValue(100)
-                progress_dialog.setLabelText("停止完成")
+            # 基于用户提供的stop.sh脚本中的模式列表
+            process_patterns = [
+                "sh shfiles/run.sh",
+                "roslaunch mavros px4.launch",
+                "roslaunch vins fast_drone_250.launch",
+                "roslaunch onboard_detector run_detector.launch",
+                "roslaunch px4ctrl run_ctrl.launch",
+                "roslaunch ego_planner single_run_in_exp.launch",
+                "roslaunch realsense2_camera rs_camera.launch",
+                "vins_to_mavros_node",
+                "pose_to_odom_converter_node",
+                "roslaunch exploration_manager exploration.launch",
+                "roslaunch yolo_detector yolo_ros.launch",
+                "roslaunch sort_ros sort_ros.launch",
+                "python3 marker_wenzi_jisuan.py",
+                "rosrun exploration_manager fuel_nav"
+            ]
+            
+            # 使用pkill强制终止每个模式的进程
+            for i, pattern in enumerate(process_patterns):
+                progress_value = 70 + (i * 10 // len(process_patterns))
+                progress_dialog.setValue(progress_value)
+                progress_dialog.setLabelText(f"正在终止进程: {pattern}...")
                 QApplication.processEvents()
-                time.sleep(0.5)  # 短暂延迟以显示完成状态
-                progress_dialog.close()
                 
-                # 简化UI流程，使用简单的消息框而不是复杂的对话框
-                # 在控制台记录所有输出，但不在UI中显示详细信息
-                print("停止脚本执行完成，返回码:", process.returncode)
-                if stdout:
-                    print("脚本输出:", stdout.strip())
-                if stderr:
-                    print("错误信息:", stderr.strip())
+                try:
+                    # 使用pgrep检查进程是否存在
+                    check_process = subprocess.run(
+                        f"pgrep -f \"{pattern}\"", 
+                        shell=True, 
+                        stdout=subprocess.PIPE, 
+                        stderr=subprocess.PIPE
+                    )
+                    
+                    if check_process.returncode == 0:  # 进程存在
+                        # 使用pkill -9 强制终止
+                        kill_cmd = f"pkill -9 -f \"{pattern}\""
+                        subprocess.run(kill_cmd, shell=True)
+                        print(f"已终止进程：{pattern}")
+                    else:
+                        print(f"未找到进程：{pattern}")
+                except Exception as e:
+                    print(f"终止进程 {pattern} 时出错: {str(e)}")
+            
+            progress_dialog.setValue(80)
+            progress_dialog.setLabelText("正在清理ROS节点...")
+            QApplication.processEvents()
+            
+            # 保留roscore，但清理其他所有ROS节点
+            try:
+                # 先检查ROS环境是否正常
+                rosnode_check = subprocess.run(
+                    "rosnode list", 
+                    shell=True, 
+                    stdout=subprocess.PIPE, 
+                    stderr=subprocess.PIPE, 
+                    text=True, 
+                    timeout=5
+                )
                 
-                # 只显示简单的成功消息，减少UI阻塞
-                if process.returncode == 0:
-                    message = "✅ 无人机系统进程已停止"
-                    QMessageBox.information(self, "停止完成", message)
+                if rosnode_check.returncode == 0:
+                    # 获取节点列表
+                    nodes = rosnode_check.stdout.strip().split('\n')
+                    # 过滤掉rosout和master相关节点
+                    nodes_to_kill = [node for node in nodes if not any(x in node for x in ['/rosout', '/master'])]
+                    
+                    if nodes_to_kill:
+                        # 每个节点单独终止
+                        for i, node in enumerate(nodes_to_kill):
+                            progress_value = 80 + (i * 10 // max(len(nodes_to_kill), 1))
+                            progress_dialog.setValue(progress_value)
+                            progress_dialog.setLabelText(f"正在清理节点: {node}...")
+                            QApplication.processEvents()
+                            
+                            kill_cmd = f"rosnode kill {node}"
+                            subprocess.run(kill_cmd, shell=True, timeout=2)
+                            print(f"已清理节点: {node}")
+                    
+                    print("已清理所有非核心ROS节点")
                 else:
-                    message = "⚠️ 部分进程可能未正常停止，请查看控制台日志"
-                    QMessageBox.warning(self, "停止警告", message)
-                
-                # 无论成功与否，都重置UI状态，释放所有资源
-                # 更新UI状态，显示系统已停止
-                if hasattr(self, 'position_label'):
-                    self.position_label.setText("Position: (系统已停止)")
-                
-                # 确保话题订阅器被完全关闭
-                if hasattr(self, 'topic_subscriber') and self.topic_subscriber:
-                    try:
-                        self.topic_subscriber.shutdown()
-                        self.topic_subscriber = None
-                    except:
-                        pass
-                
-                # 重置图像显示区域状态
-                if hasattr(self, 'image_label'):
-                    self.image_label.setText("<div style='font-size: 16pt; color: #3498DB; text-align: center; margin-top: 200px;'>系统已停止，请点击\"一键启动\"启动后台程序</div>")
-                
-                if hasattr(self, 'bird_view_label'):
-                    self.bird_view_label.setText("<div style='font-size: 14pt; color: #3498DB; text-align: center; margin-top: 100px;'>系统已停止</div>")
-                
-                # 清除图像数据
-                self.camera_image = None
-                self.depth_image = None
-                self.bird_view_image = None
-                
+                    print("ROS环境可能未启动或异常")
             except Exception as e:
-                if 'progress_dialog' in locals() and progress_dialog is not None:
-                    try:
-                        progress_dialog.close()
-                    except:
-                        pass
-                error_msg = f"执行停止脚本时出错: {str(e)}"
-                QMessageBox.critical(self, "停止失败", error_msg)
+                print(f"清理ROS节点时出错: {str(e)}")
                 
+            progress_dialog.setValue(90)
+            QApplication.processEvents()
+            
+            # 创建一个简单的实时输出过程对象以保持兼容性
+            class DummyProcess:
+                def __init__(self):
+                    self.returncode = 0
+                    
+            process = DummyProcess()
+            
+            # 准备收集输出
+            all_output = []
+            all_errors = []
+            
+            # 创建一个非阻塞读取输出的函数
+            def read_output():
+                # 使用非阻塞方式从stdout读取
+                import select
+                
+                # 设置文件描述符为非阻塞模式
+                import fcntl
+                import os
+                
+                # 获取文件描述符
+                stdout_fd = process.stdout.fileno()
+                stderr_fd = process.stderr.fileno()
+                
+                # 设置非阻塞标志
+                fl = fcntl.fcntl(stdout_fd, fcntl.F_GETFL)
+                fcntl.fcntl(stdout_fd, fcntl.F_SETFL, fl | os.O_NONBLOCK)
+                
+                fl = fcntl.fcntl(stderr_fd, fcntl.F_GETFL)
+                fcntl.fcntl(stderr_fd, fcntl.F_SETFL, fl | os.O_NONBLOCK)
+                
+                has_data = False
+                
+                # 使用select检查是否有数据可读，超时0.1秒
+                readable, _, _ = select.select([stdout_fd, stderr_fd], [], [], 0.1)
+                
+                # 读取stdout
+                if stdout_fd in readable:
+                    try:
+                        # 读一行或者最多4096字节
+                        stdout_data = process.stdout.readline()
+                        if stdout_data:
+                            all_output.append(stdout_data)
+                            # 更新进度对话框状态
+                            cur_progress = min(40 + len(all_output) * 2, 90)  # 最大到90%
+                            progress_dialog.setValue(cur_progress)
+                            progress_dialog.setLabelText(f"正在停止: {stdout_data.strip()[:50]}")
+                            has_data = True
+                    except (IOError, BrokenPipeError) as e:
+                        print(f"读取stdout时出错: {str(e)}")
+                
+                # 读取stderr
+                if stderr_fd in readable:
+                    try:
+                        # 读一行或者最多4096字节
+                        stderr_data = process.stderr.readline()
+                        if stderr_data:
+                            all_errors.append(stderr_data)
+                            has_data = True
+                    except (IOError, BrokenPipeError) as e:
+                        print(f"读取stderr时出错: {str(e)}")
+                
+                return has_data
+            
+            # 添加超时机制
+            start_time = time.time()
+            timeout = 15  # 设置最大超时时间为15秒
+            
+            # 非阻塞方式读取输出，带超时检测
+            while process.poll() is None:
+                # 检查是否超时
+                if time.time() - start_time > timeout:
+                    print("停止进程执行超时，强制终止...")
+                    process.terminate()  # 先尝试温和终止
+                    time.sleep(0.5)
+                    if process.poll() is None:  # 如果还没结束
+                        process.kill()  # 强制终止
+                        print("已强制终止停止脚本进程")
+                    break
+                
+                # 读取输出
+                if not read_output():
+                    time.sleep(0.1)
+                QApplication.processEvents()
+            
+            # 尝试读取剩余输出，但也加入超时保护
+            read_timeout = time.time() + 2  # 最多再读2秒
+            while time.time() < read_timeout and read_output():
+                QApplication.processEvents()
+                pass
+            
+            # 处理完毕，准备显示结果
+            stdout = "".join(all_output)
+            stderr = "".join(all_errors)
+            
+            # 更新进度到100%
+            progress_dialog.setValue(100)
+            progress_dialog.setLabelText("停止完成")
+            QApplication.processEvents()
+            time.sleep(0.5)  # 短暂延迟以显示完成状态
+            progress_dialog.close()
+            
+            # 简化UI流程，使用简单的消息框而不是复杂的对话框
+            # 在控制台记录所有输出，但不在UI中显示详细信息
+            print("停止脚本执行完成，返回码:", process.returncode)
+            if stdout:
+                print("脚本输出:", stdout.strip())
+            if stderr:
+                print("错误信息:", stderr.strip())
+            
+            # 只显示简单的成功消息，减少UI阻塞
+            if process.returncode == 0:
+                message = "✅ 无人机系统进程已停止"
+                QMessageBox.information(self, "停止完成", message)
+            else:
+                message = "⚠️ 部分进程可能未正常停止，请查看控制台日志"
+                QMessageBox.warning(self, "停止警告", message)
+            
+            # 无论成功与否，都重置UI状态，释放所有资源
+            # 更新UI状态，显示系统已停止
+            if hasattr(self, 'position_label'):
+                self.position_label.setText("Position: (系统已停止)")
+            
+            # 确保话题订阅器被完全关闭
+            if hasattr(self, 'topic_subscriber') and self.topic_subscriber:
+                try:
+                    self.topic_subscriber.shutdown()
+                    self.topic_subscriber = None
+                except:
+                    pass
+            
+            # 重置图像显示区域状态
+            if hasattr(self, 'image_label'):
+                self.image_label.setText("<div style='font-size: 16pt; color: #3498DB; text-align: center; margin-top: 200px;'>系统已停止，请点击\"一键启动\"启动后台程序</div>")
+            
+            if hasattr(self, 'bird_view_label'):
+                self.bird_view_label.setText("<div style='font-size: 14pt; color: #3498DB; text-align: center; margin-top: 100px;'>系统已停止</div>")
+            
+            # 清除图像数据
+            self.camera_image = None
+            self.depth_image = None
+            self.bird_view_image = None                
         except Exception as e:
             if 'progress_dialog' in locals() and progress_dialog is not None:
                 try:
@@ -3524,8 +3857,8 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         
         # 创建水平布局
         overlay_layout = QHBoxLayout(self.rviz_overlay)
-        overlay_layout.setContentsMargins(15, 6, 15, 6)
-        overlay_layout.setSpacing(10)  # 增加间距
+        overlay_layout.setContentsMargins(12, 6, 12, 6)
+        overlay_layout.setSpacing(6)  # 减小间距
         
         # 定义要显示的信息项和对应图标
         info_items = [
@@ -3539,41 +3872,46 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         
         # 创建图标和标签
         for i, item in enumerate(info_items):
-            # 如果不是第一项，添加小间距，但不添加分隔线（保持透明效果）
+            # 如果不是第一项，添加更小的间距，但不添加分隔线（保持透明效果）
             if i > 0:
-                spacer = QSpacerItem(5, 10, QSizePolicy.Fixed, QSizePolicy.Minimum)
+                spacer = QSpacerItem(2, 10, QSizePolicy.Fixed, QSizePolicy.Minimum)
                 overlay_layout.addItem(spacer)
             
             # 创建一个水平布局的容器来放置图标和值
             item_container = QWidget()
             item_layout = QHBoxLayout(item_container)
             item_layout.setContentsMargins(0, 0, 0, 0)
-            item_layout.setSpacing(5)
+            item_layout.setSpacing(2)  # 减小图标和值之间的间距
             
             # 图标
             icon_label = QLabel()
-            icon_pixmap = QPixmap(item["icon"]).scaled(22, 22, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            icon_pixmap = QPixmap(item["icon"]).scaled(20, 20, Qt.KeepAspectRatio, Qt.SmoothTransformation)  # 略微减小图标
             icon_label.setPixmap(icon_pixmap)
             icon_label.setAlignment(Qt.AlignCenter)
+            icon_label.setContentsMargins(0, 0, 0, 0)  # 移除内边距
+            
+            # 为特定图标设置对象名称，方便后续查找
+            if "battery" in item["icon"]:
+                icon_label.setObjectName("batteryIcon")
+                icon_label.setProperty("icon_type", "battery")
+            elif "voltage" in item["icon"]:
+                icon_label.setObjectName("voltageIcon")
+            
             item_layout.addWidget(icon_label)
             
-            # 值标签
-            value_label = QLabel("--")
+            # 合并值和单位到一个标签
+            value_label = QLabel("--" + (" " + item["unit"] if "unit" in item else ""))
             value_label.setProperty("class", "value")
+            value_label.setProperty("unit", item.get("unit", ""))  # 保存单位信息
+            value_label.setContentsMargins(0, 0, 0, 0)  # 移除内边距
             setattr(self, item["value_id"], value_label)
             item_layout.addWidget(value_label)
             
-            # 单位 - 减小与值的间距
-            if "unit" in item and item["unit"]:
-                unit_label = QLabel(item["unit"])
-                unit_label.setContentsMargins(0, 0, 0, 0)  # 移除内边距
-                item_layout.setSpacing(2)  # 减小间距
-                item_layout.addWidget(unit_label)
-            
             overlay_layout.addWidget(item_container)
         
-        # 设置固定高度，宽度为RViz宽度的80%
+        # 设置固定高度和宽度
         self.rviz_overlay.setFixedHeight(40)
+        self.rviz_overlay.setFixedWidth(750)  # 固定宽度为750像素
         
         # 更新位置的函数
         def updateOverlayPosition():
@@ -3581,11 +3919,10 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
                 frame_rect = self.frame.geometry()
                 frame_pos = self.frame.mapToGlobal(QPoint(0, 0))
                 
-                new_width = int(frame_rect.width() * 0.8)
-                self.rviz_overlay.setFixedWidth(new_width)
+                # 不再动态设置宽度，使用固定宽度
                 
                 # 居中显示在上方
-                x_pos = frame_pos.x() + (frame_rect.width() - new_width) // 2
+                x_pos = frame_pos.x() + (frame_rect.width() - self.rviz_overlay.width()) // 2
                 y_pos = frame_pos.y() + 20
                 
                 # 移动窗口
@@ -3630,9 +3967,13 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
                         height_value = f"{float(height_value):.2f}"
                     except:
                         pass
-                    self.altitude_value.setText(height_value)
+                    # 获取单位并添加到文本中
+                    unit = self.altitude_value.property("unit") or ""
+                    self.altitude_value.setText(f"{height_value} {unit}".strip())
                 else:
-                    self.altitude_value.setText(height_text)
+                    # 获取单位并添加到文本中
+                    unit = self.altitude_value.property("unit") or ""
+                    self.altitude_value.setText(f"{height_text} {unit}".strip())
             
             # 更新速度
             if hasattr(self, 'ground_speed_label'):
@@ -3645,14 +3986,20 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
                         speed_value = f"{float(speed_value):.2f}"
                     except:
                         pass
-                    self.speed_value.setText(speed_value)
+                    # 获取单位并添加到文本中
+                    unit = self.speed_value.property("unit") or ""
+                    self.speed_value.setText(f"{speed_value} {unit}".strip())
                 else:
-                    self.speed_value.setText(speed_text)
+                    # 获取单位并添加到文本中
+                    unit = self.speed_value.property("unit") or ""
+                    self.speed_value.setText(f"{speed_text} {unit}".strip())
             
             # 更新电池电量
             if hasattr(self, 'battery_percentage'):
                 battery = f"{self.battery_percentage:.1f}" if isinstance(self.battery_percentage, (int, float)) else "--"
-                self.battery_value.setText(battery)
+                # 获取单位并添加到文本中
+                unit = self.battery_value.property("unit") or ""
+                self.battery_value.setText(f"{battery} {unit}".strip())
                 
                 # 根据电量更新电池图标
                 battery_value = float(battery) if battery != "--" else 100
@@ -3665,19 +4012,24 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
                 else:
                     icon_path = ":/images/icons/battery_100.svg"
                     
-                # 找到电池图标并更新 - 使用简单方法
-                for widget in self.rviz_overlay.findChildren(QLabel):
-                    pixmap = widget.pixmap()
-                    if pixmap and pixmap.width() == 22 and pixmap.height() == 22:
-                        # 检查是否为电池图标（近似判断）
-                        if "battery" in widget.objectName() or "battery" in str(widget.property("icon_type")):
-                            widget.setPixmap(QPixmap(icon_path).scaled(22, 22, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+                # 直接通过对象名称查找电池图标并更新
+                battery_icon = self.rviz_overlay.findChild(QLabel, "batteryIcon")
+                if battery_icon:
+                    battery_icon.setPixmap(QPixmap(icon_path).scaled(22, 22, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+                else:
+                    # 备用方法：搜索所有标签
+                    for widget in self.rviz_overlay.findChildren(QLabel):
+                        if widget.property("icon_type") == "battery" or "battery" in str(widget.objectName()):
+                            widget.setPixmap(QPixmap(icon_path).scaled(20, 20, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+                            widget.setObjectName("batteryIcon")  # 确保设置了名称
                             break
             
             # 更新电压
             if hasattr(self, 'battery_voltage'):
                 voltage = f"{self.battery_voltage:.2f}" if isinstance(self.battery_voltage, (int, float)) else "--"
-                self.voltage_value.setText(voltage)
+                # 获取单位并添加到文本中
+                unit = self.voltage_value.property("unit") or ""
+                self.voltage_value.setText(f"{voltage} {unit}".strip())
             
             # 更新遥控器连接状态
             if hasattr(self, 'topic_subscriber') and self.topic_subscriber:
@@ -3701,7 +4053,7 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         """静默关闭无人机系统，不显示任何对话框"""
         try:
             # 立即停止所有进程监控定时器，避免重复弹出错误消息
-            for timer_attr in ['check_process_timer', 'check_process2_timer', 'check_process3_timer']:
+            for timer_attr in ['check_process_timer', 'check_process2_timer', 'check_process3_timer', 'process_monitor_timer']:
                 if hasattr(self, timer_attr):
                     timer = getattr(self, timer_attr)
                     if timer and timer.isActive():
@@ -3713,54 +4065,120 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
                 try:
                     self.topic_subscriber.shutdown()
                     self.topic_subscriber = None
-                    print("已关闭话题订阅器")
+                    # 重置话题数据状态，确保下次启动时正确初始化
+                    self.topics_with_data = {
+                        "battery": False,
+                        "status": False,
+                        "odometry": False,
+                        "velocity": False,
+                        "camera": False,
+                        "depth": False,
+                        "bird_view": False,
+                        "marker": False
+                    }
+                    print("已关闭话题订阅器并重置话题数据状态")
                 except Exception as e:
                     print(f"关闭话题订阅器时出错: {str(e)}")
             
-
-
-            # 使用已存在的停止脚本
-            script_path = "/home/togan/zyc_fuel_ws/scripts/stop.sh"
-            
-            # 检查脚本是否存在
-            if os.path.exists(script_path):
-                try:
-                    # 修改环境变量，通知脚本保留roscore运行
-                    env = os.environ.copy()
-                    env["PRESERVE_ROSCORE"] = "1"  # 设置环境变量，告知脚本保留roscore
-                    
-                    # 静默执行脚本
-                    subprocess.Popen(['bash', script_path], 
-                                  stdout=subprocess.PIPE, 
-                                  stderr=subprocess.PIPE,
-                                  env=env)   # 传递修改后的环境变量
-                    
-                    print("已启动静默终止进程")
-                except Exception as e:
-                    print(f"执行停止脚本时出错: {str(e)}")
-            else:
-                print(f"未找到停止脚本: {script_path}")
+            # 检查是否有单独启动的进程需要关闭
+            if hasattr(self, 'processes') and self.processes:
+                # 按照启动的相反顺序终止进程
+                process_order = ["planner", "px4ctrl", "detector", "vins", "mavros", "camera"]
                 
-                # 如果找不到脚本，直接尝试终止常见的ROS节点
+                for process_name in process_order:
+                    if process_name in self.processes and self.processes[process_name]:
+                        try:
+                            # 终止进程
+                            self.processes[process_name].terminate()
+                            # 给进程一点时间自行退出
+                            start_time = time.time()
+                            while time.time() - start_time < 1:  # 最多等待1秒
+                                if self.processes[process_name].poll() is not None:
+                                    # 进程已结束
+                                    break
+                                time.sleep(0.1)
+                            
+                            # 如果进程仍未退出，强制杀死
+                            if self.processes[process_name].poll() is None:
+                                self.processes[process_name].kill()
+                                
+                            print(f"已停止{process_name}进程")
+                        except Exception as e:
+                            print(f"停止{process_name}进程时出错: {str(e)}")
+                
+                # 清空进程列表
+                self.processes = {}
+            
+            # 使用强大的终止机制，确保所有相关进程都被终止
+            # 基于用户提供的stop.sh脚本中的模式列表
+            process_patterns = [
+                "sh shfiles/run.sh",
+                "roslaunch mavros px4.launch",
+                "roslaunch vins fast_drone_250.launch",
+                "roslaunch onboard_detector run_detector.launch",
+                "roslaunch px4ctrl run_ctrl.launch",
+                "roslaunch ego_planner single_run_in_exp.launch",
+                "roslaunch realsense2_camera rs_camera.launch",
+                "vins_to_mavros_node",
+                "pose_to_odom_converter_node",
+                "roslaunch exploration_manager exploration.launch",
+                "roslaunch yolo_detector yolo_ros.launch",
+                "roslaunch sort_ros sort_ros.launch",
+                "python3 marker_wenzi_jisuan.py",
+                "rosrun exploration_manager fuel_nav"
+            ]
+            
+            # 使用pkill强制终止每个模式的进程
+            for pattern in process_patterns:
                 try:
-                    # 获取所有节点列表
-                    nodes_process = subprocess.run(['rosnode', 'list'], 
-                                                stdout=subprocess.PIPE, 
-                                                stderr=subprocess.PIPE, 
-                                                text=True, 
-                                                timeout=5)
+                    # 使用pgrep检查进程是否存在
+                    check_process = subprocess.run(
+                        f"pgrep -f \"{pattern}\"", 
+                        shell=True, 
+                        stdout=subprocess.PIPE, 
+                        stderr=subprocess.PIPE
+                    )
                     
-                    if nodes_process.returncode == 0:
-                        nodes = nodes_process.stdout.strip().split('\n')
-                        # 过滤掉rosout和myviz节点（自身）
-                        nodes_to_kill = [node for node in nodes if node != '/rosout' and 'myviz' not in node]
-                        
-                        if nodes_to_kill:
-                            kill_cmd = ['rosnode', 'kill'] + nodes_to_kill
-                            subprocess.run(kill_cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=5)
-                            print(f"已尝试终止 {len(nodes_to_kill)} 个ROS节点")
+                    if check_process.returncode == 0:  # 进程存在
+                        # 使用pkill -9 强制终止
+                        kill_cmd = f"pkill -9 -f \"{pattern}\""
+                        subprocess.run(kill_cmd, shell=True)
+                        print(f"已终止进程：{pattern}")
+                    else:
+                        print(f"未找到进程：{pattern}")
                 except Exception as e:
-                    print(f"手动终止ROS节点时出错: {str(e)}")
+                    print(f"终止进程 {pattern} 时出错: {str(e)}")
+            
+            # 保留roscore，但清理其他所有ROS节点
+            try:
+                # 先检查ROS环境是否正常
+                rosnode_check = subprocess.run(
+                    "rosnode list", 
+                    shell=True, 
+                    stdout=subprocess.PIPE, 
+                    stderr=subprocess.PIPE, 
+                    text=True, 
+                    timeout=5
+                )
+                
+                if rosnode_check.returncode == 0:
+                    # 获取节点列表
+                    nodes = rosnode_check.stdout.strip().split('\n')
+                    # 过滤掉rosout和master相关节点
+                    nodes_to_kill = [node for node in nodes if not any(x in node for x in ['/rosout', '/master'])]
+                    
+                    if nodes_to_kill:
+                        # 每个节点单独终止
+                        for node in nodes_to_kill:
+                            kill_cmd = f"rosnode kill {node}"
+                            subprocess.run(kill_cmd, shell=True, timeout=2)
+                            print(f"已清理节点: {node}")
+                    
+                    print("已清理所有非核心ROS节点")
+                else:
+                    print("ROS环境可能未启动或异常")
+            except Exception as e:
+                print(f"清理ROS节点时出错: {str(e)}")
                 
         except Exception as e:
             print(f"静默停止无人机系统时出错: {str(e)}")
@@ -3810,32 +4228,28 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
                     # 尝试从姿态数据获取航向信息
                     attitude_data = self.topic_subscriber.get_latest_data("attitude")
                     if attitude_data and "yaw" in attitude_data:
-                        # 检查yaw是否为列表，如果是则取第一个元素
-                        yaw_value = attitude_data["yaw"]
+                        # 获取原始yaw值
+                        yaw_value = attitude_data.get("yaw", 0)
                         if isinstance(yaw_value, list):
                             if len(yaw_value) > 0:
                                 yaw_value = yaw_value[0]  # 取列表的第一个元素
                             else:
                                 yaw_value = 0  # 空列表时使用默认值
                         
-                        # 将弧度转换为角度并取模360
-                        heading = math.degrees(yaw_value) % 360
-                        self.compass.set_heading(heading)
-                    
-                    # 如果没有姿态数据，也可以尝试从GPS航向获取
-                    if (not attitude_data or "yaw" not in attitude_data) and hasattr(self.topic_subscriber, 'get_latest_data'):
-                        gps_data = self.topic_subscriber.get_latest_data("gps")
-                        if gps_data and "heading" in gps_data:
-                            heading_value = gps_data["heading"]
-                            # 同样检查heading是否为列表
-                            if isinstance(heading_value, list):
-                                if len(heading_value) > 0:
-                                    heading_value = heading_value[0]
-                                else:
-                                    heading_value = 0
+                        # # 将yaw值转换为角度（如果它已经是角度，则不需要转换）
+                        # # 确保角度在-360到360度范围内
+                        # heading = math.degrees(yaw_value) if isinstance(yaw_value, float) else yaw_value
+                        
+                        # 限制在360度范围内
+                        if yaw_value > 360:
+                            yaw_value = yaw_value % 360
+                        elif yaw_value < -360:
+                            yaw_value = yaw_value % 360
                             
-                            heading = heading_value % 360
-                            self.compass.set_heading(heading)
+                        # 直接使用yaw值作为指南针角度
+                        self.compass.set_heading(-yaw_value)
+                    
+                    # 注意：已移除GPS航向获取部分，确保只使用attitude中的yaw值
             except Exception as e:
                 print(f"更新指南针数据时出错: {str(e)}")
         
@@ -3936,36 +4350,7 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         # 恢复原来的鼠标跟踪状态
         self.enable_sidebar_hover = old_enable_state
         
-    def handleCloseEvent(self, event):
-        """关闭事件处理函数，确保关闭时清理资源"""
-        # 关闭所有悬浮窗口
-        if hasattr(self, 'rviz_overlay') and self.rviz_overlay:
-            self.rviz_overlay.close()
-        
-        if hasattr(self, 'compass') and self.compass:
-            self.compass.close()
-            
-        if hasattr(self, 'attitude_widget') and self.attitude_widget:
-            self.attitude_widget.close()
-            
-        # 停止所有定时器
-        if hasattr(self, 'frame_move_timer') and self.frame_move_timer:
-            self.frame_move_timer.stop()
-            
-        if hasattr(self, 'compass_move_timer') and self.compass_move_timer:
-            self.compass_move_timer.stop()
-            
-        if hasattr(self, 'attitude_move_timer') and self.attitude_move_timer:
-            self.attitude_move_timer.stop()
-            
-        # 静默关闭后台程序（不显示任何对话框）
-        try:
-            self.silentStopDroneSystem()
-        except Exception as e:
-            print(f"静默关闭程序时出错: {str(e)}")
-            
-        # 接受关闭事件
-        event.accept()
+    # handleCloseEvent方法已移至closeEvent方法下实现
 
     def autoHideSidebar(self):
         """启动后自动隐藏左侧栏和右侧栏"""
@@ -4088,6 +4473,112 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         self.enable_sidebar_hover = True
         print("鼠标跟踪已启用")
 
+    def on_position_table_cell_clicked(self, row, column):
+        """处理位置表格单元格点击事件"""
+        # 只处理截图列的点击
+        if column == 4:  # 截图列
+            ball_id = int(self.position_table.item(row, 0).text())
+            if ball_id in self.ball_screenshots:
+                # 显示截图对话框
+                self.show_screenshot_dialog(ball_id)
+    
+    def show_screenshot_dialog(self, ball_id):
+        """显示小球截图对话框"""
+        if ball_id not in self.ball_screenshots:
+            return
+        
+        # 获取截图
+        screenshot_data = self.ball_screenshots[ball_id]
+        
+        # 创建对话框
+        dialog = QDialog(self)
+        dialog.setWindowTitle(f"小球ID {ball_id} 截图")
+        dialog.setMinimumSize(640, 480)
+        
+        # 创建布局
+        layout = QVBoxLayout(dialog)
+        
+        # 创建图像标签
+        image_label = QLabel()
+        
+        # 如果有图像数据，显示图像
+        if "image" in screenshot_data and screenshot_data["image"] is not None:
+            # 将OpenCV图像转换为Qt图像
+            height, width, channel = screenshot_data["image"].shape
+            bytesPerLine = 3 * width
+            qImg = QImage(screenshot_data["image"].data, width, height, bytesPerLine, QImage.Format_RGB888)
+            pixmap = QPixmap.fromImage(qImg)
+            image_label.setPixmap(pixmap)
+            image_label.setScaledContents(True)
+        elif "path" in screenshot_data and os.path.exists(screenshot_data["path"]):
+            # 从文件加载图像
+            pixmap = QPixmap(screenshot_data["path"])
+            image_label.setPixmap(pixmap)
+            image_label.setScaledContents(True)
+        else:
+            image_label.setText("截图不可用")
+        
+        # 添加到布局
+        layout.addWidget(image_label)
+        
+        # 添加关闭按钮
+        close_button = QPushButton("关闭")
+        close_button.clicked.connect(dialog.accept)
+        layout.addWidget(close_button)
+        
+        # 显示对话框
+        dialog.exec_()
+
+    def closeEvent(self, event):
+        """窗口关闭事件处理，确保关闭时清理所有资源和进程"""
+        self.handleCloseEvent(event)
+        
+    def handleCloseEvent(self, event):
+        """关闭事件处理函数，确保关闭时清理资源"""
+        # 关闭所有悬浮窗口
+        if hasattr(self, 'rviz_overlay') and self.rviz_overlay:
+            self.rviz_overlay.close()
+        
+        if hasattr(self, 'compass') and self.compass:
+            self.compass.close()
+            
+        if hasattr(self, 'attitude_widget') and self.attitude_widget:
+            self.attitude_widget.close()
+            
+        # 停止所有定时器
+        if hasattr(self, 'frame_move_timer') and self.frame_move_timer:
+            self.frame_move_timer.stop()
+            
+        if hasattr(self, 'compass_move_timer') and self.compass_move_timer:
+            self.compass_move_timer.stop()
+            
+        if hasattr(self, 'attitude_move_timer') and self.attitude_move_timer:
+            self.attitude_move_timer.stop()
+        
+        if hasattr(self, 'topic_status_timer') and self.topic_status_timer:
+            self.topic_status_timer.stop()
+            
+        # 静默关闭后台程序（不显示任何对话框）
+        try:
+            self.silentStopDroneSystem()
+            
+            # 确保话题数据状态重置
+            self.topics_with_data = {
+                "battery": False,
+                "status": False,
+                "odometry": False,
+                "velocity": False,
+                "camera": False,
+                "depth": False,
+                "bird_view": False,
+                "marker": False
+            }
+        except Exception as e:
+            print(f"静默关闭程序时出错: {str(e)}")
+            
+        # 接受关闭事件
+        event.accept()
+
 ## Start the Application
 ## ^^^^^^^^^^^^^^^^^^^^^
 ##
@@ -4168,6 +4659,10 @@ if __name__ == '__main__':
     set_serial_permissions()
     
     app = QApplication(sys.argv)
+    
+    # 设置应用程序图标
+    app_icon = QIcon("logo.png")
+    app.setWindowIcon(app_icon)
     
     # 确保应用程序支持中文
     QTextCodec.setCodecForLocale(QTextCodec.codecForName("UTF-8"))
