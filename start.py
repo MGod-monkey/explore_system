@@ -2139,7 +2139,6 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         """启动无人机系统"""
         try:
             # 创建日志目录
-            # 使用当前目录下的log文件夹而不是/tmp目录
             current_dir = os.path.dirname(os.path.abspath(__file__))
             log_dir = os.path.join(current_dir, "log")
             os.makedirs(log_dir, exist_ok=True)
@@ -2158,167 +2157,65 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
             fast_drone_ws = os.path.expanduser("~/GUET_UAV_Drone_v2")
             zyc_fuel_ws = os.path.expanduser("~/zyc_fuel_ws")
             
-            # 创建主系统日志文件
+            # 后台启动第一个程序 - 使用同步执行方式
+            progress_dialog.setLabelText("正在启动主系统...")
+            progress_dialog.setValue(10)
+            QApplication.processEvents()
+            
+            # 创建日志文件
             main_system_log = f"{log_dir}/main_system_{timestamp}.log"
             self.log_files = {"main_system": main_system_log}
             print(f"主系统日志文件: {main_system_log}")
             
-            # 保存所有进程的引用
-            self.processes = {}
-            
-            # 第1步：设置串口权限
-            progress_dialog.setLabelText("正在设置串口权限...")
-            progress_dialog.setValue(5)
-            QApplication.processEvents()
-            
+            cmd1 = f"cd {fast_drone_ws} && source {fast_drone_ws}/devel/setup.bash && sh shfiles/run.sh"
             with open(main_system_log, 'w') as log_file:
-                cmd_chmod = "sudo chmod 777 /dev/ttyACM0"
-                process_chmod = subprocess.Popen(cmd_chmod, shell=True, stdout=log_file, stderr=log_file, 
+                process = subprocess.Popen(cmd1, shell=True, stdout=log_file, stderr=log_file, 
                                         executable='/bin/bash', text=True)
-                process_chmod.wait(timeout=3)  # 等待权限设置完成
-                log_file.write("\n\n--- 设置串口权限完成 ---\n\n")
             
-            # 第2步：启动RealSense相机
-            progress_dialog.setLabelText("正在启动RealSense相机...")
-            progress_dialog.setValue(10)
-            QApplication.processEvents()
+            # 等待25秒，确保所有节点启动完成
+            timeout = 25  # 增加到25秒等待，与run.sh中的累计睡眠时间一致
+            start_time = time.time()
             
-            rs_camera_log = f"{log_dir}/rs_camera_{timestamp}.log"
-            self.log_files["rs_camera"] = rs_camera_log
-            
-            with open(rs_camera_log, 'w') as log_file:
-                cmd_camera = f"cd {fast_drone_ws} && source {fast_drone_ws}/devel/setup.bash && roslaunch realsense2_camera rs_camera.launch"
-                process_camera = subprocess.Popen(cmd_camera, shell=True, stdout=log_file, stderr=log_file, 
-                                        executable='/bin/bash', text=True)
-                self.processes["camera"] = process_camera
-            
-            # 等待5秒确保相机启动
-            time.sleep(5)
-            progress_dialog.setValue(20)
-            QApplication.processEvents()
-            
-            # 第3步：启动MAVROS
-            progress_dialog.setLabelText("正在启动MAVROS...")
-            progress_dialog.setValue(25)
-            QApplication.processEvents()
-            
-            mavros_log = f"{log_dir}/mavros_{timestamp}.log"
-            self.log_files["mavros"] = mavros_log
-            
-            with open(mavros_log, 'w') as log_file:
-                cmd_mavros = f"cd {fast_drone_ws} && source {fast_drone_ws}/devel/setup.bash && roslaunch mavros px4.launch"
-                process_mavros = subprocess.Popen(cmd_mavros, shell=True, stdout=log_file, stderr=log_file, 
-                                        executable='/bin/bash', text=True)
-                self.processes["mavros"] = process_mavros
-            
-            # 等待5秒确保MAVROS启动
-            time.sleep(5)
-            progress_dialog.setValue(35)
-            QApplication.processEvents()
-            
-            # 第4步：设置MAVROS参数
-            progress_dialog.setLabelText("正在配置MAVROS参数...")
-            progress_dialog.setValue(40)
-            QApplication.processEvents()
-            
-            with open(mavros_log, 'a') as log_file:
-                # 设置第一个参数
-                cmd_param1 = f"cd {fast_drone_ws} && source {fast_drone_ws}/devel/setup.bash && rosrun mavros mavcmd long 511 105 5000 0 0 0 0 0"
-                process_param1 = subprocess.Popen(cmd_param1, shell=True, stdout=log_file, stderr=log_file, 
-                                        executable='/bin/bash', text=True)
-                process_param1.wait(timeout=3)  # 等待命令完成
-                log_file.write("\n\n--- 参数1设置完成 ---\n\n")
+            # 非阻塞方式检查进程是否已结束
+            while time.time() - start_time < timeout:
+                returncode = process.poll()
+                if returncode is not None:  # 进程已结束
+                    if returncode != 0:
+                        # 获取错误输出
+                        _, stderr = process.communicate()
+                        error_msg = f"启动无人机系统失败，返回代码: {returncode}\n\n错误信息:\n{stderr[:500]}..."
+                        QMessageBox.critical(self, "启动错误", error_msg)
+                        progress_dialog.close()
+                        return
+                    break
+                    
+                # 更新进度条 - 在25秒内从10%逐步增加到50%
+                elapsed = time.time() - start_time
+                progress = int(10 + min(25, (elapsed / timeout * 25)))
+                progress_dialog.setValue(progress)
                 
-                # 设置第二个参数
-                cmd_param2 = f"cd {fast_drone_ws} && source {fast_drone_ws}/devel/setup.bash && rosrun mavros mavcmd long 511 31 5000 0 0 0 0 0"
-                process_param2 = subprocess.Popen(cmd_param2, shell=True, stdout=log_file, stderr=log_file, 
-                                        executable='/bin/bash', text=True)
-                process_param2.wait(timeout=3)  # 等待命令完成
-                log_file.write("\n\n--- 参数2设置完成 ---\n\n")
+                # 显示更有用的信息，包括剩余等待时间
+                remaining = max(0, int(timeout - elapsed))
+                progress_dialog.setLabelText(f"正在启动主系统...（还需等待约{remaining}秒）")
+                
+                QApplication.processEvents()
+                time.sleep(0.5)  # 增加sleep间隔，减少UI更新频率
             
-            # 第5步：启动VINS
-            progress_dialog.setLabelText("正在启动VINS视觉惯性系统...")
-            progress_dialog.setValue(45)
+            # 无论脚本是否返回，都继续执行（run.sh是以后台方式运行各个节点的）
+            print("已启动run.sh脚本，将等待其后台完成各节点启动")
+            
+            # 设置一个定时器检查进程是否在后续运行中出错
+            self.check_process_timer = QTimer()
+            self.check_process_timer.timeout.connect(lambda: self.checkProcessStatus(process, "主系统"))
+            self.check_process_timer.start(5000)  # 每5秒检查一次
+            
+            # 继续执行，第一个脚本已经正常启动
+            progress_dialog.setValue(50)
+            progress_dialog.setLabelText("启动位姿转换模块...")
             QApplication.processEvents()
             
-            vins_log = f"{log_dir}/vins_{timestamp}.log"
-            self.log_files["vins"] = vins_log
-            
-            with open(vins_log, 'w') as log_file:
-                cmd_vins = f"cd {fast_drone_ws} && source {fast_drone_ws}/devel/setup.bash && roslaunch vins fast_drone_250.launch"
-                process_vins = subprocess.Popen(cmd_vins, shell=True, stdout=log_file, stderr=log_file, 
-                                        executable='/bin/bash', text=True)
-                self.processes["vins"] = process_vins
-            
-            # 等待5秒确保VINS启动
-            time.sleep(5)
-            progress_dialog.setValue(55)
-            QApplication.processEvents()
-            
-            # 第6步：启动目标检测器
-            progress_dialog.setLabelText("正在启动目标检测系统...")
-            progress_dialog.setValue(60)
-            QApplication.processEvents()
-            
-            detector_log = f"{log_dir}/detector_{timestamp}.log"
-            self.log_files["detector"] = detector_log
-            
-            with open(detector_log, 'w') as log_file:
-                cmd_detector = f"cd {fast_drone_ws} && source {fast_drone_ws}/devel/setup.bash && roslaunch onboard_detector run_detector.launch"
-                process_detector = subprocess.Popen(cmd_detector, shell=True, stdout=log_file, stderr=log_file, 
-                                        executable='/bin/bash', text=True)
-                self.processes["detector"] = process_detector
-            
-            # 等待3秒确保检测器启动
-            time.sleep(3)
-            progress_dialog.setValue(70)
-            QApplication.processEvents()
-            
-            # 第7步：启动PX4控制器
-            progress_dialog.setLabelText("正在启动飞控系统...")
-            progress_dialog.setValue(75)
-            QApplication.processEvents()
-            
-            px4ctrl_log = f"{log_dir}/px4ctrl_{timestamp}.log"
-            self.log_files["px4ctrl"] = px4ctrl_log
-            
-            with open(px4ctrl_log, 'w') as log_file:
-                cmd_px4ctrl = f"cd {fast_drone_ws} && source {fast_drone_ws}/devel/setup.bash && roslaunch px4ctrl run_ctrl.launch"
-                process_px4ctrl = subprocess.Popen(cmd_px4ctrl, shell=True, stdout=log_file, stderr=log_file, 
-                                        executable='/bin/bash', text=True)
-                self.processes["px4ctrl"] = process_px4ctrl
-            
-            # 等待2秒确保PX4控制器启动
-            time.sleep(2)
-            progress_dialog.setValue(85)
-            QApplication.processEvents()
-            
-            # 第8步：启动Ego规划器
-            progress_dialog.setLabelText("正在启动路径规划系统...")
-            progress_dialog.setValue(90)
-            QApplication.processEvents()
-            
-            planner_log = f"{log_dir}/planner_{timestamp}.log"
-            self.log_files["planner"] = planner_log
-            
-            with open(planner_log, 'w') as log_file:
-                cmd_planner = f"cd {fast_drone_ws} && source {fast_drone_ws}/devel/setup.bash && roslaunch ego_planner single_run_in_exp.launch"
-                process_planner = subprocess.Popen(cmd_planner, shell=True, stdout=log_file, stderr=log_file, 
-                                        executable='/bin/bash', text=True)
-                self.processes["planner"] = process_planner
-            
-            # 设置定时器监视所有进程状态
-            self.process_monitor_timer = QTimer()
-            self.process_monitor_timer.timeout.connect(self.monitorAllProcesses)
-            self.process_monitor_timer.start(5000)  # 每5秒检查一次所有进程
-            
-            # 更新进度
-            progress_dialog.setValue(95)
-            progress_dialog.setLabelText("正在启动位姿转换模块...")
-            QApplication.processEvents()
-            
-            # 延迟启动第二个主要进程
-            QTimer.singleShot(2000, lambda: self.startSecondProcess(progress_dialog))
+            # 延迟启动第二个进程 - 给run.sh额外的1秒时间完成启动
+            QTimer.singleShot(1000, lambda: self.startSecondProcess(progress_dialog))
             
         except Exception as e:
             QMessageBox.critical(self, "启动错误", f"启动无人机系统时出错: {str(e)}")
@@ -2572,8 +2469,7 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
             self.topic_subscriber.register_callback("marker", self.marker_callback)
             self.topic_subscriber.register_callback("attitude", self.updateAttitudeDisplay)
             
-            # 添加MAVROS话题回调 - 只保留状态话题，其他与普通话题重复
-            self.topic_subscriber.register_callback("mavros_state", self.updateStatusDisplay)
+            # 注意：已移除MAVROS话题回调，使用普通话题替代
             
             print("话题订阅器已启动，将在后台自动连接可用话题...")
             return True
@@ -3753,6 +3649,39 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
                 except:
                     pass
             
+            # 重置所有UI标签到初始状态
+            if hasattr(self, 'altitude_label'):
+                self.altitude_label.setText("-- m")
+            
+            if hasattr(self, 'ground_speed_label'):
+                self.ground_speed_label.setText("-- m/s")
+            
+            if hasattr(self, 'mode_label'):
+                self.mode_label.setText("未连接")
+            
+            if hasattr(self, 'connection_label'):
+                self.connection_label.setText("未连接")
+                self.connection_label.setStyleSheet("color: #E74C3C; font-size: 12pt; font-weight: bold;")
+            
+            if hasattr(self, 'battery_status_label'):
+                self.battery_status_label.setText("--%")
+            
+            if hasattr(self, 'voltage_label'):
+                self.voltage_label.setText("-- V")
+            
+            if hasattr(self, 'pitch_label'):
+                self.pitch_label.setText("0.00°")
+            
+            if hasattr(self, 'roll_label'):
+                self.roll_label.setText("0.00°")
+            
+            if hasattr(self, 'yaw_label'):
+                self.yaw_label.setText("0.00°")
+            
+            # 重置电池图标
+            if hasattr(self, 'battery_icon_label'):
+                self.battery_icon_label.setPixmap(QPixmap(":/images/icons/battery_100.svg").scaled(24, 24, Qt.KeepAspectRatio, Qt.SmoothTransformation))
+            
             # 重置图像显示区域状态
             if hasattr(self, 'image_label'):
                 self.image_label.setText("<div style='font-size: 16pt; color: #3498DB; text-align: center; margin-top: 200px;'>系统已停止，请点击\"一键启动\"启动后台程序</div>")
@@ -3763,7 +3692,19 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
             # 清除图像数据
             self.camera_image = None
             self.depth_image = None
-            self.bird_view_image = None                
+            self.bird_view_image = None
+            
+            # 重置话题数据状态标志
+            self.topics_with_data = {
+                "battery": False,
+                "status": False,
+                "odometry": False,
+                "velocity": False,
+                "camera": False,
+                "depth": False,
+                "bird_view": False,
+                "marker": False
+            }           
         except Exception as e:
             if 'progress_dialog' in locals() and progress_dialog is not None:
                 try:
