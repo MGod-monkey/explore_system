@@ -382,113 +382,52 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         left_sidebar_layout.setContentsMargins(10, 10, 10, 10)  # 增加边距
         left_sidebar_layout.setSpacing(10)  # 减小组件间距
         
-        # 添加无人机状态组件
-        status_group = QGroupBox("无人机状态")
-        status_group.setStyleSheet("color: #3498DB; font-size: 14pt;")  # 增大字体
+        # 添加无人机状态组件 - 现代化卡片设计
+        status_group = QGroupBox("🚁 无人机状态")
+        status_group.setStyleSheet("""
+            QGroupBox {
+                color: #3498DB;
+                font-size: 16pt;
+                font-weight: bold;
+                border: 2px solid #3498DB;
+                border-radius: 12px;
+                padding: 15px;
+                margin-top: 20px;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 rgba(52, 152, 219, 0.1),
+                    stop:1 rgba(26, 32, 44, 0.8));
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                subcontrol-position: top center;
+                padding: 0 10px;
+                background-color: #1E2330;
+                border-radius: 6px;
+            }
+        """)
         status_group_layout = QVBoxLayout(status_group)
-        status_group_layout.setContentsMargins(10, 20, 10, 10)  # 增加内边距
-        status_group_layout.setSpacing(15)  # 增加组件间距
-        
-        # 创建无人机状态信息容器，使用垂直布局使界面更美观
+        status_group_layout.setContentsMargins(12, 25, 12, 12)
+        status_group_layout.setSpacing(15)
+
+        # 创建无人机状态信息容器，使用现代化卡片布局
         info_container = QWidget()
-        info_container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)  # 允许扩展
+        info_container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        info_container.setStyleSheet("""
+            QWidget {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 rgba(44, 62, 80, 0.9),
+                    stop:1 rgba(26, 32, 44, 0.9));
+                border-radius: 10px;
+                border: 1px solid rgba(52, 152, 219, 0.3);
+            }
+        """)
         info_layout = QVBoxLayout(info_container)
-        info_layout.setContentsMargins(10, 15, 10, 15)  # 增加内边距使布局更美观
-        info_layout.setSpacing(20)  # 增加间距
+        info_layout.setContentsMargins(15, 15, 15, 15)
+        info_layout.setSpacing(12)
         
-        # 创建两列布局的容器
-        status_grid = QWidget()
-        status_grid_layout = QGridLayout(status_grid)
-        status_grid_layout.setContentsMargins(0, 0, 0, 0)
-        status_grid_layout.setSpacing(15)  # 合适的间距
-        
-        # 减小字体大小以确保文本显示完整
-        label_style = "font-size: 12pt; font-weight: normal; color: #FFFFFF;"
-        value_style = "font-size: 12pt; font-weight: bold; color: #3498DB;"
-        
-        # 添加重要状态标签 - 使用两列布局
-        row = 0
-        
-        # 第一行 - 无人机模式和连接状态
-        mode_label_desc = QLabel("模式:")  # 缩短标签文字
-        mode_label_desc.setStyleSheet(label_style)
-        status_grid_layout.addWidget(mode_label_desc, row, 0)
-        self.mode_label = QLabel("MANUAL")
-        self.mode_label.setStyleSheet(value_style)
-        self.mode_label.setMinimumWidth(150)  # 增加最小宽度确保文本显示完整
-        status_grid_layout.addWidget(self.mode_label, row, 1)
-        
-        conn_label_desc = QLabel("连接状态:")
-        conn_label_desc.setStyleSheet(label_style)
-        status_grid_layout.addWidget(conn_label_desc, row, 2)
-        self.connection_label = QLabel("已连接")
-        self.connection_label.setStyleSheet("font-size: 12pt; font-weight: bold; color: #2ECC71;")
-        status_grid_layout.addWidget(self.connection_label, row, 3)
-        
-        row += 1
-        
-        # 第二行 - 飞行高度和地面速度
-        alt_label_desc = QLabel("飞行高度:")
-        alt_label_desc.setStyleSheet(label_style)
-        status_grid_layout.addWidget(alt_label_desc, row, 0)
-        self.altitude_label = QLabel("0.0000 m")
-        self.altitude_label.setStyleSheet(value_style)
-        status_grid_layout.addWidget(self.altitude_label, row, 1)
-        
-        speed_label_desc = QLabel("地面速度:")
-        speed_label_desc.setStyleSheet(label_style)
-        status_grid_layout.addWidget(speed_label_desc, row, 2)
-        self.ground_speed_label = QLabel("0.0000 m/s")
-        self.ground_speed_label.setStyleSheet(value_style)
-        status_grid_layout.addWidget(self.ground_speed_label, row, 3)
-        
-        row += 1
-        
-        # 第三行 - 姿态角度信息
-        pitch_label_desc = QLabel("俯仰角:")
-        pitch_label_desc.setStyleSheet(label_style)
-        status_grid_layout.addWidget(pitch_label_desc, row, 0)
-        self.pitch_label = QLabel("0.00°")
-        self.pitch_label.setStyleSheet(value_style)
-        status_grid_layout.addWidget(self.pitch_label, row, 1)
-        
-        roll_label_desc = QLabel("滚转角:")
-        roll_label_desc.setStyleSheet(label_style)
-        status_grid_layout.addWidget(roll_label_desc, row, 2)
-        self.roll_label = QLabel("0.00°")
-        self.roll_label.setStyleSheet(value_style)
-        status_grid_layout.addWidget(self.roll_label, row, 3)
-        
-        row += 1
-        
-        # 第四行 - 偏航角和电池状态
-        yaw_label_desc = QLabel("偏航角:")
-        yaw_label_desc.setStyleSheet(label_style)
-        status_grid_layout.addWidget(yaw_label_desc, row, 0)
-        self.yaw_label = QLabel("0.00°")
-        self.yaw_label.setStyleSheet(value_style)
-        status_grid_layout.addWidget(self.yaw_label, row, 1)
-        
-        battery_status_desc = QLabel("电池状态:")
-        battery_status_desc.setStyleSheet(label_style)
-        status_grid_layout.addWidget(battery_status_desc, row, 2)
-        self.battery_status_label = QLabel(f"{self.battery_percentage:.1f}%")
-        self.battery_status_label.setStyleSheet(value_style)
-        status_grid_layout.addWidget(self.battery_status_label, row, 3)
-        
-        # 设置列宽度比例，确保均匀分布
-        for col in range(4):
-            status_grid_layout.setColumnStretch(col, 1)
-            
-        # 添加状态网格到容器
-        info_layout.addWidget(status_grid)
-        
-        # 添加美观的分隔线
-        separator = QFrame()
-        separator.setFrameShape(QFrame.HLine)
-        separator.setFrameShadow(QFrame.Sunken)
-        separator.setStyleSheet("background-color: #3498DB; min-height: 2px;")
-        info_layout.addWidget(separator)
+        # 创建状态卡片容器
+        self.createStatusCards(info_layout)
+
         
         status_group_layout.addWidget(info_container, 1)  # 使用拉伸系数1
         
@@ -1210,7 +1149,17 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         # 初始状态设置为未连接
         if hasattr(self, 'connection_label'):
             self.connection_label.setText("未连接")
-            self.connection_label.setStyleSheet("color: #E74C3C;")
+            self.connection_label.setStyleSheet("""
+                QLabel {
+                    color: #E74C3C;
+                    font-size: 14pt;
+                    font-weight: bold;
+                    background: transparent;
+                    border: none;
+                    padding: 0px;
+                    margin: 0px;
+                }
+            """)
         if hasattr(self, 'mode_label'):
             self.mode_label.setText("未连接")
         
@@ -1242,6 +1191,162 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         if not os.path.exists(self.screenshots_dir):
             os.makedirs(self.screenshots_dir)
     
+    def createStatusCards(self, parent_layout):
+        """创建现代化的状态卡片"""
+        # 第一行状态卡片
+        row1_container = QWidget()
+        row1_layout = QHBoxLayout(row1_container)
+        row1_layout.setContentsMargins(0, 0, 0, 0)
+        row1_layout.setSpacing(12)
+
+        # 飞行模式卡片
+        mode_card = self.createStatusCard("飞行模式", "MANUAL", "#3498DB")
+        self.mode_label = mode_card.findChild(QLabel, "value_label")
+        row1_layout.addWidget(mode_card)
+
+        # 连接状态卡片
+        connection_card = self.createStatusCard("连接状态", "已连接", "#2ECC71")
+        self.connection_label = connection_card.findChild(QLabel, "value_label")
+        row1_layout.addWidget(connection_card)
+
+        parent_layout.addWidget(row1_container)
+
+        # 第二行状态卡片
+        row2_container = QWidget()
+        row2_layout = QHBoxLayout(row2_container)
+        row2_layout.setContentsMargins(0, 0, 0, 0)
+        row2_layout.setSpacing(12)
+
+        # 飞行高度卡片
+        altitude_card = self.createStatusCard("飞行高度", "0.0000 m", "#E67E22")
+        self.altitude_label = altitude_card.findChild(QLabel, "value_label")
+        row2_layout.addWidget(altitude_card)
+
+        # 地面速度卡片
+        speed_card = self.createStatusCard("地面速度", "0.0000 m/s", "#9B59B6")
+        self.ground_speed_label = speed_card.findChild(QLabel, "value_label")
+        row2_layout.addWidget(speed_card)
+
+        parent_layout.addWidget(row2_container)
+
+        # 第三行状态卡片 - 姿态信息
+        row3_container = QWidget()
+        row3_layout = QHBoxLayout(row3_container)
+        row3_layout.setContentsMargins(0, 0, 0, 0)
+        row3_layout.setSpacing(10)
+
+        # 俯仰角卡片
+        pitch_card = self.createStatusCard("俯仰角", "0.00°", "#1ABC9C", compact=True)
+        self.pitch_label = pitch_card.findChild(QLabel, "value_label")
+        row3_layout.addWidget(pitch_card)
+
+        # 滚转角卡片
+        roll_card = self.createStatusCard("滚转角", "0.00°", "#F39C12", compact=True)
+        self.roll_label = roll_card.findChild(QLabel, "value_label")
+        row3_layout.addWidget(roll_card)
+
+        # 偏航角卡片
+        yaw_card = self.createStatusCard("偏航角", "0.00°", "#E74C3C", compact=True)
+        self.yaw_label = yaw_card.findChild(QLabel, "value_label")
+        row3_layout.addWidget(yaw_card)
+
+        parent_layout.addWidget(row3_container)
+
+        # 第四行 - 电池状态卡片（全宽）
+        battery_card = self.createStatusCard("电池状态", f"{self.battery_percentage:.1f}%", "#27AE60", full_width=True)
+        self.battery_status_label = battery_card.findChild(QLabel, "value_label")
+        parent_layout.addWidget(battery_card)
+
+    def createStatusCard(self, title, value, color, compact=False, full_width=False):
+        """创建单个状态卡片"""
+        card = QFrame()
+        card.setFrameShape(QFrame.StyledPanel)
+
+        # 根据是否紧凑模式和全宽模式设置不同的样式
+        if compact:
+            card.setStyleSheet(f"""
+                QFrame {{
+                    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                        stop:0 rgba(255, 255, 255, 0.08),
+                        stop:1 rgba(0, 0, 0, 0.12));
+                    border: 1px solid {color};
+                    border-radius: 8px;
+                    margin: 2px;
+                }}
+                QFrame:hover {{
+                    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                        stop:0 rgba(255, 255, 255, 0.12),
+                        stop:1 rgba(0, 0, 0, 0.08));
+                    border: 2px solid {color};
+                }}
+            """)
+            card.setMinimumHeight(70)
+            card.setMaximumHeight(70)
+        else:
+            card.setStyleSheet(f"""
+                QFrame {{
+                    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                        stop:0 rgba(255, 255, 255, 0.08),
+                        stop:1 rgba(0, 0, 0, 0.12));
+                    border: 1px solid {color};
+                    border-radius: 10px;
+                    margin: 3px;
+                }}
+                QFrame:hover {{
+                    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                        stop:0 rgba(255, 255, 255, 0.12),
+                        stop:1 rgba(0, 0, 0, 0.08));
+                    border: 2px solid {color};
+                }}
+            """)
+            if full_width:
+                card.setMinimumHeight(75)
+                card.setMaximumHeight(75)
+            else:
+                card.setMinimumHeight(85)
+                card.setMaximumHeight(85)
+
+        layout = QVBoxLayout(card)
+        layout.setContentsMargins(0, 0, 0, 0)  # 去掉内边距
+        layout.setSpacing(0)  # 去掉间距
+
+        # 标题标签 - 占50%高度
+        title_label = QLabel(title)
+        title_label.setStyleSheet("""
+            QLabel {
+                color: #FFFFFF;
+                font-size: 11pt;
+                font-weight: normal;
+                background: transparent;
+                border: none;
+                padding: 0px;
+                margin: 0px;
+            }
+        """)
+        title_label.setAlignment(Qt.AlignCenter)
+        title_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        layout.addWidget(title_label, 1)  # 拉伸因子1，占50%
+
+        # 数值标签 - 占50%高度
+        value_label = QLabel(value)
+        value_label.setObjectName("value_label")  # 设置对象名以便查找
+        value_label.setStyleSheet(f"""
+            QLabel {{
+                color: {color};
+                font-size: {'12pt' if compact else '14pt'};
+                font-weight: bold;
+                background: transparent;
+                border: none;
+                padding: 0px;
+                margin: 0px;
+            }}
+        """)
+        value_label.setAlignment(Qt.AlignCenter)
+        value_label.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        layout.addWidget(value_label, 1)  # 拉伸因子1，占50%
+
+        return card
+
     def toggleDisplayPanel(self):
         """此方法已不再使用，保留以避免可能的引用错误"""
         self.toggleRVizDisplayPanel()
@@ -1548,10 +1653,30 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
             if hasattr(self, 'connection_label'):
                 if connected:
                     self.connection_label.setText("已连接")
-                    self.connection_label.setStyleSheet("color: #2ECC71; font-size: 12pt; font-weight: bold;")
+                    self.connection_label.setStyleSheet("""
+                        QLabel {
+                            color: #2ECC71;
+                            font-size: 14pt;
+                            font-weight: bold;
+                            background: transparent;
+                            border: none;
+                            padding: 0px;
+                            margin: 0px;
+                        }
+                    """)
                 else:
                     self.connection_label.setText("未连接")
-                    self.connection_label.setStyleSheet("color: #E74C3C; font-size: 12pt; font-weight: bold;")
+                    self.connection_label.setStyleSheet("""
+                        QLabel {
+                            color: #E74C3C;
+                            font-size: 14pt;
+                            font-weight: bold;
+                            background: transparent;
+                            border: none;
+                            padding: 0px;
+                            margin: 0px;
+                        }
+                    """)
             
             # 更新模式显示
             if hasattr(self, 'mode_label'):
@@ -1747,7 +1872,17 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
                 if not self.topic_subscriber or not self.topic_subscriber.is_topic_active("status"):
                     # 未连接状态
                     self.connection_label.setText("未连接")
-                    self.connection_label.setStyleSheet("color: #E74C3C;")
+                    self.connection_label.setStyleSheet("""
+                        QLabel {
+                            color: #E74C3C;
+                            font-size: 14pt;
+                            font-weight: bold;
+                            background: transparent;
+                            border: none;
+                            padding: 0px;
+                            margin: 0px;
+                        }
+                    """)
                 # 注意：如果话题已连接，则由updateStatusDisplay函数更新状态
             
             # 当没有/mavros/state话题连接时，显示为未知模式
@@ -3661,7 +3796,17 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
             
             if hasattr(self, 'connection_label'):
                 self.connection_label.setText("未连接")
-                self.connection_label.setStyleSheet("color: #E74C3C; font-size: 12pt; font-weight: bold;")
+                self.connection_label.setStyleSheet("""
+                    QLabel {
+                        color: #E74C3C;
+                        font-size: 14pt;
+                        font-weight: bold;
+                        background: transparent;
+                        border: none;
+                        padding: 0px;
+                        margin: 0px;
+                    }
+                """)
             
             if hasattr(self, 'battery_status_label'):
                 self.battery_status_label.setText("--%")

@@ -427,26 +427,33 @@ class UIButton(QWidget):
         self.leftText = "开始探索"
         # self.bottomText = "功能待定"
         
-        # 设置颜色 - 使用与系统主题匹配的配色方案
-        self.centerColor = QColor("#62e336")  # 绿色，启动按钮
+        # 设置颜色 - 使用现代化渐变配色方案
+        self.centerColor = QColor("#27AE60")  # 现代绿色，启动按钮
+        self.centerColorHover = QColor("#2ECC71")  # 悬停时的亮绿色
         self.topColor = QColor("#8E44AD")     # 紫色，返航按钮
-        self.rightColor = QColor("#e33662")   # 红色，停止按钮
-        self.leftColor = QColor("#3662e3")    # 蓝色，探索按钮
+        self.rightColor = QColor("#E74C3C")   # 现代红色，停止按钮
+        self.rightColorHover = QColor("#C0392B")  # 悬停时的深红色
+        self.leftColor = QColor("#3498DB")    # 现代蓝色，探索按钮
+        self.leftColorHover = QColor("#2980B9")  # 悬停时的深蓝色
         self.bottomColor = QColor("#7F8C8D")  # 灰色，待定按钮
-        
+
         # 加载中间按钮图标
         self.centerIcon = QPixmap(":/images/icons/start.svg")
-        
-        # 设置工具提示样式
+
+        # 设置现代化工具提示样式
         self.setStyleSheet("""
             QToolTip {
-                background-color: #2C3E50;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 rgba(44, 62, 80, 0.95),
+                    stop:1 rgba(26, 32, 44, 0.95));
                 color: #FFFFFF;
-                border: 1px solid #3498DB;
-                border-radius: 4px;
-                padding: 4px;
+                border: 2px solid #3498DB;
+                border-radius: 8px;
+                padding: 8px 12px;
                 font-size: 11pt;
-                opacity: 225;
+                font-weight: normal;
+                text-align: center;
+                opacity: 240;
             }
         """)
 
@@ -479,23 +486,38 @@ class UIButton(QWidget):
         # 大扇形减去小扇形，得到扇形饼圆
         self.rightBtnView = pathOuterChampagnePie.subtracted(pathMidPie)
         
-        # 设置文字路径
-        textPath = QPainterPath()
-        # 使用更小的字体
+        # 设置文字字体和位置
         font = QFont("WenQuanYi Micro Hei", 8)
+        font.setWeight(QFont.Normal)  # 设置为正常字重
         # 位置调整，使文字在扇形中央
         textX = radius1 * 0.24
         textY = radius1 * 0.045
-        textPath.addText(textX, textY, font, self.rightText)
         
-        # 绘制图形和文字
+        # 创建渐变效果
+        gradient = QRadialGradient(0, 0, radius1/2)
+        if self.mouseRightView:
+            gradient.setColorAt(0, self.rightColorHover)
+            gradient.setColorAt(0.7, self.rightColor)
+            gradient.setColorAt(1, self.rightColor.darker(120))
+        else:
+            gradient.setColorAt(0, self.rightColor.lighter(110))
+            gradient.setColorAt(0.7, self.rightColor)
+            gradient.setColorAt(1, self.rightColor.darker(110))
+
+        # 绘制图形
         painter.setPen(Qt.NoPen)
-        painter.setBrush(self.rightColor)
+        painter.setBrush(QBrush(gradient))
         painter.drawPath(self.rightBtnView)
-        
+
+        # 添加边框效果
+        painter.setPen(QPen(self.rightColor.lighter(150), 1))
+        painter.setBrush(Qt.NoBrush)
+        painter.drawPath(self.rightBtnView)
+
         # 绘制文字
-        painter.setPen(Qt.white)
-        painter.drawPath(textPath)
+        painter.setFont(font)
+        painter.setPen(QColor("#FFFFFF"))
+        painter.drawText(int(textX), int(textY), self.rightText)
         
         painter.restore()
 
@@ -565,14 +587,12 @@ class UIButton(QWidget):
         pathOuterChampagnePie.lineTo(0, 0)
         pathOuterChampagnePie.closeSubpath()
         
-        # 设置文字路径
-        textPath = QPainterPath()
-        # 使用更小的字体
+        # 设置文字字体和位置
         font = QFont("WenQuanYi Micro Hei", 8)
+        font.setWeight(QFont.Normal)  # 设置为正常字重
         # 位置调整，使文字在扇形中央
         textX = -radius1 * 0.48
         textY = radius1 * 0.045
-        textPath.addText(textX, textY, font, self.leftText)
       
         # 绘制小扇形
         radius = self.innerPieRadius
@@ -586,14 +606,31 @@ class UIButton(QWidget):
         # 大扇形减去小扇形，得到扇形饼圆
         self.leftBtnView = pathOuterChampagnePie.subtracted(pathMidPie)
         
-        # 绘制图形和文字
+        # 创建渐变效果
+        gradient = QRadialGradient(0, 0, radius1/2)
+        if self.mouseLeftView:
+            gradient.setColorAt(0, self.leftColorHover)
+            gradient.setColorAt(0.7, self.leftColor)
+            gradient.setColorAt(1, self.leftColor.darker(120))
+        else:
+            gradient.setColorAt(0, self.leftColor.lighter(110))
+            gradient.setColorAt(0.7, self.leftColor)
+            gradient.setColorAt(1, self.leftColor.darker(110))
+
+        # 绘制图形
         painter.setPen(Qt.NoPen)
-        painter.setBrush(self.leftColor)
+        painter.setBrush(QBrush(gradient))
         painter.drawPath(self.leftBtnView)
-        
+
+        # 添加边框效果
+        painter.setPen(QPen(self.leftColor.lighter(150), 1))
+        painter.setBrush(Qt.NoBrush)
+        painter.drawPath(self.leftBtnView)
+
         # 绘制文字
-        painter.setPen(Qt.white)
-        painter.drawPath(textPath)
+        painter.setFont(font)
+        painter.setPen(QColor("#FFFFFF"))
+        painter.drawText(int(textX), int(textY), self.leftText)
         
         painter.restore()
 
@@ -654,15 +691,32 @@ class UIButton(QWidget):
             radius = 40
         
         painter.save()
-        painter.setPen(Qt.NoPen)
-        painter.setBrush(self.centerColor)
-        
+
+        # 创建渐变效果
+        gradient = QRadialGradient(0, 0, radius/2)
+        if self.mouseCenterView:
+            gradient.setColorAt(0, self.centerColorHover)
+            gradient.setColorAt(0.7, self.centerColor)
+            gradient.setColorAt(1, self.centerColor.darker(120))
+        else:
+            gradient.setColorAt(0, self.centerColor.lighter(110))
+            gradient.setColorAt(0.7, self.centerColor)
+            gradient.setColorAt(1, self.centerColor.darker(110))
+
         # 创建圆形路径
         path = QPainterPath()
         path.addEllipse(-radius/2, -radius/2, radius, radius)
-        
+
         # 绘制圆形
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QBrush(gradient))
         painter.drawPath(path)
+
+        # 添加边框效果
+        painter.setPen(QPen(self.centerColor.lighter(150), 2))
+        painter.setBrush(Qt.NoBrush)
+        painter.drawPath(path)
+
         self.centerBtnView = path
         
         # 绘制图标 (使用起始按钮图标)
