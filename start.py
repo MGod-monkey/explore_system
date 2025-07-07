@@ -84,15 +84,25 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
     ## to layouts.
     def __init__(self):
         QMainWindow.__init__(self)  # 初始化QMainWindow
-        
+
+        # 获取屏幕信息，用于自适应布局
+        self.desktop = QDesktopWidget()
+        self.screen_geometry = self.desktop.availableGeometry(self.desktop.primaryScreen())
+        self.screen_width = self.screen_geometry.width()
+        self.screen_height = self.screen_geometry.height()
+        print(f"检测到屏幕分辨率: {self.screen_width}x{self.screen_height}")
+
+        # 根据屏幕分辨率计算自适应尺寸
+        self.calculateAdaptiveSizes()
+
         # 电池状态变量
         self.battery_percentage = 100.0
         self.battery_voltage = 12.0  # 默认电压值
-        
+
         # 设置中文字体支持
         font = QFont("WenQuanYi Micro Hei", 10)
         QApplication.setFont(font)
-        
+
         # 设置应用图标
         icon = QIcon("logo.png")
         self.setWindowIcon(icon)
@@ -375,7 +385,7 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         
         # 创建左侧边栏，用于显示速度表盘和其他信息
         self.left_sidebar = QWidget()
-        self.left_sidebar.setFixedWidth(500)  # 设置固定宽度500px
+        self.left_sidebar.setFixedWidth(self.adaptive_left_width)  # 使用自适应宽度
         # 使用QSizePolicy允许垂直方向缩放
         self.left_sidebar.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
         left_sidebar_layout = QVBoxLayout(self.left_sidebar)
@@ -800,7 +810,7 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         
         # 创建右侧栏
         self.right_sidebar = QWidget()
-        self.right_sidebar.setFixedWidth(650)  # 设置固定宽度650px
+        self.right_sidebar.setFixedWidth(self.adaptive_right_width)  # 使用自适应宽度
         # 使右侧栏可以在垂直方向调整大小
         self.right_sidebar.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
         self.right_sidebar.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)  # 设置固定宽度策略
@@ -962,7 +972,7 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         # 鸟瞰图显示
         self.bird_view_label = QLabel()
         self.bird_view_label.setAlignment(Qt.AlignCenter)
-        self.bird_view_label.setFixedSize(640, 240)  # 固定尺寸为640x240
+        self.bird_view_label.setFixedSize(self.adaptive_image_width, self.adaptive_bird_height)  # 使用自适应尺寸
         self.bird_view_label.setStyleSheet("background-color: #1A202C; border: 1px solid #3498DB; border-top: none;")
         self.bird_view_label.setText("等待鸟瞰图数据...")
         bird_view_layout.addWidget(self.bird_view_label)
@@ -986,8 +996,9 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         
         # RGB图像按钮 - 深色
         self.rgb_button = QPushButton("RGB图像")
-        self.rgb_button.setStyleSheet("""
-            QPushButton {
+        button_width = self.adaptive_image_width // 2  # 按钮宽度为图像宽度的一半
+        self.rgb_button.setStyleSheet(f"""
+            QPushButton {{
                 background-color: #2C3E50;  /* 深色 */
                 color: white;
                 border-radius: 0;  /* 无圆角 */
@@ -995,13 +1006,13 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
                 font-weight: bold;
                 font-size: 10pt;  /* 固定字体大小 */
                 padding: 2px;
-                min-width: 320px;
+                min-width: {button_width}px;
                 text-align: center;
-            }
-            QPushButton:hover {
+            }}
+            QPushButton:hover {{
                 background-color: #234567;
-            }
-            QPushButton:checked {
+            }}
+            QPushButton:checked {{
                 background-color: #1A202C;  /* 选中时更深的颜色 */
                 color: white;
                 border-radius: 0;  /* 无圆角 */
@@ -1009,9 +1020,9 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
                 font-weight: bold;
                 font-size: 10pt;  /* 固定字体大小 */
                 padding: 2px;
-                min-width: 320px;
+                min-width: {button_width}px;
                 text-align: center;
-            }
+            }}
         """)
         self.rgb_button.setCheckable(True)
         self.rgb_button.setChecked(True)
@@ -1020,8 +1031,8 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         
         # 深度图像按钮 - 浅色
         self.depth_button = QPushButton("深度图像")
-        self.depth_button.setStyleSheet("""
-            QPushButton {
+        self.depth_button.setStyleSheet(f"""
+            QPushButton {{
                 background-color: #3498DB;  /* 浅色 */
                 color: white;
                 border-radius: 0;  /* 无圆角 */
@@ -1029,13 +1040,13 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
                 font-weight: bold;
                 font-size: 10pt;  /* 固定字体大小 */
                 padding: 2px;
-                min-width: 320px;
+                min-width: {button_width}px;
                 text-align: center;
-            }
-            QPushButton:hover {
+            }}
+            QPushButton:hover {{
                 background-color: #2980B9;
-            }
-            QPushButton:checked {
+            }}
+            QPushButton:checked {{
                 background-color: #1A202C;  /* 选中时更深的颜色 */
                 color: white;
                 border-radius: 0;  /* 无圆角 */
@@ -1043,9 +1054,9 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
                 font-weight: bold;
                 font-size: 10pt;  /* 固定字体大小 */
                 padding: 2px;
-                min-width: 320px;
+                min-width: {button_width}px;
                 text-align: center;
-            }
+            }}
         """)
         self.depth_button.setCheckable(True)
         self.depth_button.clicked.connect(self.switchToDepthImage)
@@ -1057,7 +1068,7 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         # 创建图像显示区域
         self.image_label = QLabel()
         self.image_label.setAlignment(Qt.AlignCenter)
-        self.image_label.setFixedSize(640, 480)  # 固定尺寸为640x480
+        self.image_label.setFixedSize(self.adaptive_image_width, self.adaptive_image_height)  # 使用自适应尺寸
         self.image_label.setStyleSheet("background-color: #1A202C; border: 1px solid #3498DB; border-top: none;")
         self.image_label.setText("等待图像...")
         image_display_layout.addWidget(self.image_label)
@@ -1083,14 +1094,8 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         self.main_splitter.setChildrenCollapsible(False)  # 防止子部件被完全折叠
         self.right_splitter.setChildrenCollapsible(False)  # 防止子部件被完全折叠
         
-        # 设置大分辨率下的分割器初始比例 - 以百分比形式
-        total_width = QDesktopWidget().availableGeometry().width()
-        if total_width > 1920:  # 对于大分辨率屏幕
-            # 假设总宽为100，分配左:中:右 = 20:50:30的比例
-            left_width = int(total_width * 0.2)
-            right_width = int(total_width * 0.3)
-            center_width = total_width - left_width - right_width - 40  # 40是两个控制条的宽度
-            self.main_splitter.setSizes([left_width, 20, center_width, 20, right_width])
+        # 设置自适应的分割器初始比例
+        self.setupAdaptiveSplitterSizes()
 
         # 禁止分割器伸缩右侧栏
         self.main_splitter.setStretchFactor(0, 0)  # 左侧栏不自动拉伸
@@ -1099,10 +1104,7 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         self.main_splitter.setStretchFactor(3, 0)  # 右侧控制按钮不自动拉伸
         self.main_splitter.setStretchFactor(4, 0)  # 右侧栏不自动拉伸
         
-        # 设置初始分割比例
-        total_width = self.width()  # 获取窗口总宽度
-        remaining_width = total_width - 500 - 20 - 20 - 650  # 总宽度减去左侧栏、左侧控制按钮、右侧控制按钮和右侧栏的宽度
-        self.main_splitter.setSizes([500, 20, remaining_width, 20, 650])  # 左侧栏500px，左控制按钮20px，中间RViz区域自适应，右控制按钮20px，右侧栏650px
+        # 初始分割比例将在setupAdaptiveSplitterSizes中设置
         
         main_layout.addWidget(self.main_splitter)
         
@@ -1190,6 +1192,98 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         self.screenshots_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "screenshots")
         if not os.path.exists(self.screenshots_dir):
             os.makedirs(self.screenshots_dir)
+
+    def calculateAdaptiveSizes(self):
+        """根据屏幕分辨率计算自适应尺寸"""
+        # 基准分辨率为1920x1080
+        base_width = 1920
+        base_height = 1080
+
+        # 计算缩放比例
+        width_scale = self.screen_width / base_width
+        height_scale = self.screen_height / base_height
+        scale = min(width_scale, height_scale)  # 使用较小的缩放比例保持比例
+
+        # 计算自适应的侧边栏宽度
+        base_left_width = 500
+        base_right_width = 650
+
+        # 根据屏幕宽度动态调整侧边栏宽度
+        if self.screen_width <= 1366:  # 小屏幕
+            self.adaptive_left_width = max(300, int(base_left_width * 0.7))
+            self.adaptive_right_width = max(400, int(base_right_width * 0.7))
+        elif self.screen_width <= 1920:  # 中等屏幕
+            self.adaptive_left_width = max(350, int(base_left_width * 0.8))
+            self.adaptive_right_width = max(500, int(base_right_width * 0.8))
+        else:  # 大屏幕
+            self.adaptive_left_width = base_left_width
+            self.adaptive_right_width = base_right_width
+
+        # 计算自适应的图像尺寸
+        base_image_width = 640
+        base_image_height = 480
+        base_bird_height = 240
+
+        # 根据右侧栏宽度调整图像尺寸，保持一定的边距
+        margin = 20
+        max_image_width = self.adaptive_right_width - margin
+
+        # 保持16:9或4:3的宽高比
+        if max_image_width < base_image_width:
+            self.adaptive_image_width = max_image_width
+            self.adaptive_image_height = int(max_image_width * 3 / 4)  # 4:3比例
+            self.adaptive_bird_height = int(max_image_width * 3 / 8)   # 鸟瞰图高度为图像高度的一半
+        else:
+            self.adaptive_image_width = base_image_width
+            self.adaptive_image_height = base_image_height
+            self.adaptive_bird_height = base_bird_height
+
+        print(f"自适应尺寸 - 左侧栏: {self.adaptive_left_width}px, 右侧栏: {self.adaptive_right_width}px")
+        print(f"自适应尺寸 - 图像: {self.adaptive_image_width}x{self.adaptive_image_height}px, 鸟瞰图: {self.adaptive_image_width}x{self.adaptive_bird_height}px")
+
+    def setupAdaptiveSplitterSizes(self):
+        """设置自适应的分割器尺寸"""
+        # 使用定时器延迟设置，确保窗口已经完全初始化
+        QTimer.singleShot(100, self._setAdaptiveSplitterSizes)
+
+    def _setAdaptiveSplitterSizes(self):
+        """实际设置分割器尺寸的方法"""
+        # 获取当前窗口宽度，如果窗口还没有显示，使用屏幕宽度
+        current_width = self.width() if self.isVisible() else self.screen_width
+
+        # 计算各部分的宽度
+        control_button_width = 20  # 控制按钮宽度
+        total_control_width = control_button_width * 2  # 两个控制按钮
+
+        # 计算中间RViz区域的宽度
+        remaining_width = current_width - self.adaptive_left_width - self.adaptive_right_width - total_control_width
+
+        # 确保中间区域有最小宽度
+        min_center_width = 400
+        if remaining_width < min_center_width:
+            # 如果空间不足，按比例缩小侧边栏
+            total_sidebar_width = self.adaptive_left_width + self.adaptive_right_width
+            available_sidebar_width = current_width - min_center_width - total_control_width
+
+            if available_sidebar_width > 0:
+                scale_factor = available_sidebar_width / total_sidebar_width
+                adjusted_left_width = max(200, int(self.adaptive_left_width * scale_factor))
+                adjusted_right_width = max(300, int(self.adaptive_right_width * scale_factor))
+                remaining_width = current_width - adjusted_left_width - adjusted_right_width - total_control_width
+            else:
+                # 极端情况，使用最小值
+                adjusted_left_width = 200
+                adjusted_right_width = 300
+                remaining_width = max(min_center_width, current_width - adjusted_left_width - adjusted_right_width - total_control_width)
+        else:
+            adjusted_left_width = self.adaptive_left_width
+            adjusted_right_width = self.adaptive_right_width
+
+        # 设置分割器尺寸
+        sizes = [adjusted_left_width, control_button_width, remaining_width, control_button_width, adjusted_right_width]
+        self.main_splitter.setSizes(sizes)
+
+        print(f"分割器尺寸设置: 左侧栏={adjusted_left_width}px, 中间={remaining_width}px, 右侧栏={adjusted_right_width}px")
     
     def createStatusCards(self, parent_layout):
         """创建现代化的状态卡片"""
@@ -1449,42 +1543,42 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
             # 显示侧边栏
             if animate:
                 # 先设置最大宽度，以便动画可以工作
-                self.left_sidebar.setMaximumWidth(500)
+                self.left_sidebar.setMaximumWidth(self.adaptive_left_width)
                 self.left_sidebar.setMinimumWidth(0)
                 self.left_sidebar.setVisible(True)
-                
+
                 # 使用动画效果
                 self.sidebar_animation = QPropertyAnimation(self.left_sidebar, b"maximumWidth")
                 self.sidebar_animation.setDuration(200)  # 动画持续时间200ms
                 self.sidebar_animation.setStartValue(0)
-                self.sidebar_animation.setEndValue(500)
+                self.sidebar_animation.setEndValue(self.adaptive_left_width)
                 self.sidebar_animation.setEasingCurve(QEasingCurve.InOutQuad)
-                
+
                 # 动画结束后更新状态
                 self.sidebar_animation.finished.connect(lambda: self.finishSidebarAnimation(True))
-                
+
                 # 启动动画
                 self.sidebar_animation.start()
-                
+
                 # 立即更新状态
                 self.updateSidebarState(True)
-                
+
                 # 更新分割器尺寸
                 sizes = self.main_splitter.sizes()
-                self.main_splitter.setSizes([500, 20, sizes[2] - 500])
+                self.main_splitter.setSizes([self.adaptive_left_width, 20, sizes[2] - self.adaptive_left_width])
             else:
                 # 直接显示
-                self.left_sidebar.setFixedWidth(500)  # 固定宽度500px
+                self.left_sidebar.setFixedWidth(self.adaptive_left_width)  # 使用自适应宽度
                 self.left_sidebar.setVisible(True)
                 self.updateSidebarState(True)
-                
+
                 # 更新分割器尺寸
                 sizes = self.main_splitter.sizes()
-                self.main_splitter.setSizes([500, 20, sizes[2] - 500])
+                self.main_splitter.setSizes([self.adaptive_left_width, 20, sizes[2] - self.adaptive_left_width])
     
     def finishSidebarAnimation(self, expanded):
         """动画结束后的处理
-        
+
         参数:
             expanded: 是否展开
         """
@@ -1493,7 +1587,7 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
             self.left_sidebar.setVisible(False)
         else:
             # 如果是显示状态，确保最小宽度也设置好
-            self.left_sidebar.setMinimumWidth(500)
+            self.left_sidebar.setMinimumWidth(self.adaptive_left_width)
     
     def updateSidebarState(self, expanded):
         """更新侧边栏状态
@@ -2096,30 +2190,30 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
             # 显示右侧栏
             if animate:
                 # 先设置最大宽度，以便动画可以工作
-                self.right_sidebar.setMaximumWidth(650)
+                self.right_sidebar.setMaximumWidth(self.adaptive_right_width)
                 self.right_sidebar.setMinimumWidth(0)
                 self.right_sidebar.setVisible(True)
-                
+
                 # 使用动画效果
                 self.right_sidebar_animation = QPropertyAnimation(self.right_sidebar, b"maximumWidth")
                 self.right_sidebar_animation.setDuration(200)  # 动画持续时间200ms
                 self.right_sidebar_animation.setStartValue(0)
-                self.right_sidebar_animation.setEndValue(650)
+                self.right_sidebar_animation.setEndValue(self.adaptive_right_width)
                 self.right_sidebar_animation.setEasingCurve(QEasingCurve.InOutQuad)
-                
+
                 # 动画结束后更新状态
                 self.right_sidebar_animation.finished.connect(lambda: self.finishRightSidebarAnimation(True))
-                
+
                 # 启动动画
                 self.right_sidebar_animation.start()
-                
+
                 # 立即更新状态
                 self.updateRightSidebarState(True)
-                
+
                 # 更新分割器尺寸
                 sizes = self.main_splitter.sizes()
-                if sizes[2] > 650:  # 确保中间区域有足够空间
-                    new_sizes = [sizes[0], sizes[1], sizes[2] - 650, sizes[3], 650]
+                if sizes[2] > self.adaptive_right_width:  # 确保中间区域有足够空间
+                    new_sizes = [sizes[0], sizes[1], sizes[2] - self.adaptive_right_width, sizes[3], self.adaptive_right_width]
                 else:  # 如果中间区域空间不足，则按比例分配
                     total_space = sizes[2]
                     new_middle = max(int(total_space * 0.4), 100)  # 至少保留100px给中间区域
@@ -2127,14 +2221,14 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
                 self.main_splitter.setSizes(new_sizes)
             else:
                 # 直接显示
-                self.right_sidebar.setFixedWidth(650)  # 固定宽度650px
+                self.right_sidebar.setFixedWidth(self.adaptive_right_width)  # 使用自适应宽度
                 self.right_sidebar.setVisible(True)
                 self.updateRightSidebarState(True)
-                
+
                 # 更新分割器尺寸
                 sizes = self.main_splitter.sizes()
-                if sizes[2] > 650:  # 确保中间区域有足够空间
-                    new_sizes = [sizes[0], sizes[1], sizes[2] - 650, sizes[3], 650]
+                if sizes[2] > self.adaptive_right_width:  # 确保中间区域有足够空间
+                    new_sizes = [sizes[0], sizes[1], sizes[2] - self.adaptive_right_width, sizes[3], self.adaptive_right_width]
                 else:  # 如果中间区域空间不足，则按比例分配
                     total_space = sizes[2]
                     new_middle = max(int(total_space * 0.4), 100)  # 至少保留100px给中间区域
@@ -2143,7 +2237,7 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
                 
     def finishRightSidebarAnimation(self, expanded):
         """右侧栏动画结束后的处理
-        
+
         参数:
             expanded: 是否展开
         """
@@ -2152,7 +2246,7 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
             self.right_sidebar.setVisible(False)
         else:
             # 如果是显示状态，确保最小宽度也设置好
-            self.right_sidebar.setMinimumWidth(650)
+            self.right_sidebar.setMinimumWidth(self.adaptive_right_width)
     
     def updateRightSidebarState(self, expanded):
         """更新右侧栏状态
@@ -3334,34 +3428,43 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
             # 获取当前窗口大小
             window_height = self.height()
             window_width = self.width()
-            
-            # 根据窗口大小动态调整布局
-            if window_height < 800:
-                # 调整鸟瞰图尺寸
-                if hasattr(self, 'bird_view_label'):
-                    new_height = max(120, int(window_height * 0.15))  # 最小120px
-                    self.bird_view_label.setFixedHeight(new_height)
-                
-                # 调整图像标签尺寸
-                if hasattr(self, 'image_label'):
-                    new_height = max(240, int(window_height * 0.3))  # 最小240px
-                    self.image_label.setFixedHeight(new_height)
-                
-                # 小窗口模式下简化功能组标题，避免截断
-                if hasattr(self, 'function_group') and window_width < 1600:
+
+            # 重新计算自适应尺寸
+            self.screen_width = window_width
+            self.screen_height = window_height
+            self.calculateAdaptiveSizes()
+
+            # 动态调整侧边栏宽度
+            if hasattr(self, 'left_sidebar'):
+                self.left_sidebar.setFixedWidth(self.adaptive_left_width)
+
+            if hasattr(self, 'right_sidebar'):
+                self.right_sidebar.setFixedWidth(self.adaptive_right_width)
+
+            # 调整图像显示尺寸
+            if hasattr(self, 'bird_view_label'):
+                self.bird_view_label.setFixedSize(self.adaptive_image_width, self.adaptive_bird_height)
+
+            if hasattr(self, 'image_label'):
+                self.image_label.setFixedSize(self.adaptive_image_width, self.adaptive_image_height)
+
+            # 调整按钮宽度
+            if hasattr(self, 'rgb_button') and hasattr(self, 'depth_button'):
+                button_width = self.adaptive_image_width // 2
+                self.rgb_button.setMinimumWidth(button_width)
+                self.depth_button.setMinimumWidth(button_width)
+
+            # 重新设置分割器尺寸
+            if hasattr(self, 'main_splitter'):
+                self._setAdaptiveSplitterSizes()
+
+            # 小窗口模式下简化功能组标题，避免截断
+            if hasattr(self, 'function_group'):
+                if window_width < 1600:
                     self.function_group.setTitle(" 控制中心 ")
-            else:
-                # 恢复默认尺寸
-                if hasattr(self, 'bird_view_label'):
-                    self.bird_view_label.setFixedSize(640, 240)
-                
-                if hasattr(self, 'image_label'):
-                    self.image_label.setFixedSize(640, 480)
-                
-                # 大窗口模式下扩展功能组标题
-                if hasattr(self, 'function_group') and window_width >= 1600:
+                else:
                     self.function_group.setTitle("   控制中心   ")
-            
+
             # 调用原始的resizeEvent
             QMainWindow.resizeEvent(self, event)
         except Exception as e:
@@ -4765,7 +4868,7 @@ if __name__ == '__main__':
     
     # 创建主窗口
     myviz = MyViz()
-    
+
     # 不要使用自定义布局，避免"already has a layout"错误
     # myviz.setLayout(main_layout) # 删除这一行
 
@@ -4775,9 +4878,12 @@ if __name__ == '__main__':
     width = available_geometry.width()
     height = available_geometry.height()
     print(f"可用屏幕区域: {width}x{height}, 位置: ({available_geometry.x()}, {available_geometry.y()})")
-    
-    # 直接以最大化模式启动窗口
-    myviz.showMaximized()
+
+    # 设置窗口为全屏模式启动
+    myviz.showFullScreen()  # 使用全屏模式而不是最大化模式
+
+    # 延迟设置分割器尺寸，确保窗口已完全显示
+    QTimer.singleShot(500, myviz.setupAdaptiveSplitterSizes)
     
     # 启动Qt事件循环
     try:
