@@ -3686,13 +3686,14 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
             status_item.setForeground(QBrush(QColor("#F39C12")))  # 橙色
             self.position_table.setItem(row_position, 3, status_item)
             
-            # 添加截图按钮
-            screenshot_item = QTableWidgetItem("查看截图")
-            screenshot_item.setForeground(QBrush(QColor("#2980B9")))  # 蓝色
+            # 查找预先保存的截图
+            screenshot_status = self.load_ball_screenshot(ball_id)
+            screenshot_item = QTableWidgetItem(screenshot_status)
+            if screenshot_status == "查看截图":
+                screenshot_item.setForeground(QBrush(QColor("#27AE60")))  # 绿色表示有截图
+            else:
+                screenshot_item.setForeground(QBrush(QColor("#E74C3C")))  # 红色表示无截图
             self.position_table.setItem(row_position, 4, screenshot_item)
-            
-            # 拍摄小球截图
-            self.capture_ball_screenshot(ball_id)
             
             print(f"已添加标记点到表格: ID={ball_id}, X={x:.2f}, Y={y:.2f}, Z={z:.2f}")
             
@@ -3701,41 +3702,49 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         except Exception as e:
             print(f"添加标记点到表格时出错: {str(e)}")
             
-    def capture_ball_screenshot(self, ball_id):
-        """拍摄小球截图并保存"""
+    def load_ball_screenshot(self, ball_id):
+        """加载小球的预先保存的截图"""
         try:
-            # 确保有话题订阅器且相机图像可用
-            if not self.topic_subscriber or not hasattr(self.topic_subscriber, "get_data"):
-                print("话题订阅器未初始化，无法拍摄截图")
-                return
-                
-            # 获取当前相机图像
-            camera_data = self.topic_subscriber.get_data("camera")
-            if not camera_data or "image" not in camera_data or camera_data["image"] is None:
-                print("相机图像未获取，无法拍摄截图")
-                return
-                
-            # 复制图像以避免引用问题
-            image_copy = camera_data["image"].copy()
-            
-            # 保存图像到文件
-            timestamp = int(time.time())
-            filename = f"ball_{ball_id}_{timestamp}.jpg"
-            filepath = os.path.join(self.screenshots_dir, filename)
-            
-            # 保存截图
-            cv2.imwrite(filepath, image_copy)
-            
-            # 存储截图信息
-            self.ball_screenshots[ball_id] = {
-                "image": image_copy,
-                "path": filepath,
-                "timestamp": timestamp
-            }
-            
-            print(f"已为小球ID {ball_id} 拍摄并保存截图: {filepath}")
+            # 检查ball_screenshots目录中是否有对应的截图文件
+            ball_screenshots_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ball_screenshots")
+
+            if not os.path.exists(ball_screenshots_dir):
+                print(f"截图目录不存在: {ball_screenshots_dir}")
+                return "无截图"
+
+            # 查找以ball_{ball_id}_开头的文件
+            import glob
+            pattern = os.path.join(ball_screenshots_dir, f"ball_{ball_id}_*.jpg")
+            matching_files = glob.glob(pattern)
+
+            if matching_files:
+                # 如果找到多个文件，选择最新的
+                latest_file = max(matching_files, key=os.path.getctime)
+
+                # 验证文件是否可读
+                if os.path.exists(latest_file) and os.path.getsize(latest_file) > 0:
+                    # 存储截图信息
+                    self.ball_screenshots[ball_id] = {
+                        "path": latest_file,
+                        "timestamp": os.path.getctime(latest_file)
+                    }
+                    print(f"找到小球 {ball_id} 的截图: {latest_file}")
+                    return "查看截图"
+                else:
+                    print(f"截图文件损坏或为空: {latest_file}")
+                    return "截图损坏"
+            else:
+                print(f"未找到小球 {ball_id} 的截图文件")
+                return "无截图"
+
         except Exception as e:
-            print(f"拍摄小球截图时出错: {str(e)}")
+            print(f"加载小球截图时出错: {str(e)}")
+            return "加载失败"
+
+    def capture_ball_screenshot(self, ball_id):
+        """拍摄小球截图并保存（已弃用，现在使用预先保存的截图）"""
+        # 这个函数现在不再使用，因为截图是在检测过程中预先保存的
+        print(f"注意: capture_ball_screenshot 已弃用，小球 {ball_id} 的截图应该已经预先保存")
 
     def stopDroneSystem(self):
         """停止无人机系统"""
