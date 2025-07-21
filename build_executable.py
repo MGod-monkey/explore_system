@@ -60,10 +60,11 @@ def prepare_build_environment():
     # 复制必要文件
     files_to_copy = [
         "start.py",
-        "dashboard.py", 
+        "dashboard.py",
         "topics_subscriber.py",
         "topic_logger.py",
         "images_rc.py",
+        "ball_pose_tracker.py",
         "topics_config.json",
         "my_config.rviz",
         "logo.png"
@@ -222,8 +223,19 @@ fi
 # 获取脚本所在目录
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" &> /dev/null && pwd )"
 
-# 切换到程序目录
+# 切换到程序目录（重要：确保工作目录正确）
 cd "$SCRIPT_DIR"
+
+# 显示当前工作目录
+echo "当前工作目录: $(pwd)"
+
+# 检查必要的目录
+for dir in "ball_screenshots" "screenshots" "log"; do
+    if [ ! -d "$dir" ]; then
+        mkdir -p "$dir"
+        echo "✅ 创建目录: $dir"
+    fi
+done
 
 # 启动主程序
 echo "启动主程序..."
@@ -284,36 +296,42 @@ def build_executable(build_dir, spec_file):
 def create_package(build_dir, exe_file):
     """创建最终的发布包"""
     print("\n=== 创建发布包 ===")
-    
-    package_dir = Path("drone_search_system_package")
+
+    package_dir = Path("drone_search_system_release")  # 修改包名以匹配安装脚本
     if package_dir.exists():
         shutil.rmtree(package_dir)
     package_dir.mkdir()
-    
+
     # 复制可执行文件
     shutil.copy2(build_dir / exe_file, package_dir)
-    
-    # 复制启动脚本
+
+    # 复制启动脚本并重命名
     startup_script = build_dir / "start_drone_system.sh"
     if startup_script.exists():
-        shutil.copy2(startup_script, package_dir)
-    
+        # 重命名为与安装脚本期望的名称一致
+        shutil.copy2(startup_script, package_dir / "run_drone_system.sh")
+
     # 复制必要的配置文件
     config_files = ["my_config.rviz", "topics_config.json", "logo.png"]
     for config_file in config_files:
         src_file = build_dir / config_file
         if src_file.exists():
             shutil.copy2(src_file, package_dir)
-    
+
     # 复制资源目录
     resource_src = build_dir / "resource"
     if resource_src.exists():
         shutil.copytree(resource_src, package_dir / "resource")
-    
-    # 复制截图目录
+
+    # 创建必要的目录结构（即使为空）
+    (package_dir / "ball_screenshots").mkdir(exist_ok=True)
+    (package_dir / "screenshots").mkdir(exist_ok=True)
+    (package_dir / "log").mkdir(exist_ok=True)
+
+    # 复制现有的截图目录（如果存在）
     screenshots_src = build_dir / "ball_screenshots"
     if screenshots_src.exists():
-        shutil.copytree(screenshots_src, package_dir / "ball_screenshots")
+        shutil.copytree(screenshots_src, package_dir / "ball_screenshots", dirs_exist_ok=True)
     
     # 创建README
     readme_content = '''# 无人机自主搜索系统
@@ -326,25 +344,34 @@ def create_package(build_dir, exe_file):
 ## 安装说明
 1. 确保ROS环境已正确安装和配置
 2. 解压此包到任意目录
-3. 运行启动脚本: ./start_drone_system.sh
+3. 运行安装脚本: ./install_desktop_icon.sh（可选）
+4. 运行启动脚本: ./run_drone_system.sh
 
 ## 文件说明
 - drone_search_system: 主程序可执行文件
-- start_drone_system.sh: 启动脚本
+- run_drone_system.sh: 启动脚本
 - my_config.rviz: RViz配置文件
 - topics_config.json: 话题配置文件
 - resource/: 资源文件目录
-- ball_screenshots/: 截图保存目录
+- ball_screenshots/: 小球截图保存目录
+- screenshots/: 一般截图保存目录
+- log/: 日志文件目录
 
 ## 使用方法
-1. 运行 ./start_drone_system.sh 启动系统
+1. 运行 ./run_drone_system.sh 启动系统
 2. 系统会自动启动roscore（如果未运行）
 3. 使用GUI界面控制无人机系统
+
+## 路径说明
+- 程序会优先在当前目录创建数据文件夹
+- 如果当前目录不可写，会在用户主目录下创建 ~/drone_search_system/ 文件夹
+- 截图和日志文件会保存在相应的数据目录中
 
 ## 注意事项
 - 首次运行可能需要设置串口权限
 - 确保所有ROS包已正确安装
 - 如遇问题，请检查ROS环境变量设置
+- 确保程序目录有写入权限，或者程序会自动使用用户目录
 '''
     
     readme_file = package_dir / "README.md"

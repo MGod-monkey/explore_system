@@ -88,6 +88,69 @@ except ImportError:
 # RViz导入
 from rviz import bindings as rviz
 
+# 路径工具函数
+def get_application_directory():
+    """
+    获取应用程序目录，兼容打包和非打包环境
+    在打包环境下，返回可执行文件所在目录
+    在开发环境下，返回脚本文件所在目录
+    """
+    if getattr(sys, 'frozen', False):
+        # 打包环境：使用可执行文件所在目录
+        application_path = os.path.dirname(sys.executable)
+    else:
+        # 开发环境：使用脚本文件所在目录
+        application_path = os.path.dirname(os.path.abspath(__file__))
+
+    return application_path
+
+def get_data_directory(subdir_name):
+    """
+    获取数据目录（截图、日志等），确保在用户可写的位置
+    优先使用程序目录，如果不可写则使用用户主目录
+    """
+    app_dir = get_application_directory()
+    data_dir = os.path.join(app_dir, subdir_name)
+
+    # 检查程序目录是否可写
+    try:
+        # 尝试在程序目录创建测试文件
+        test_file = os.path.join(app_dir, '.write_test')
+        with open(test_file, 'w') as f:
+            f.write('test')
+        os.remove(test_file)
+
+        # 如果可写，使用程序目录
+        if not os.path.exists(data_dir):
+            os.makedirs(data_dir)
+        return data_dir
+
+    except (OSError, PermissionError):
+        # 如果程序目录不可写，使用用户主目录
+        user_data_dir = os.path.expanduser(f"~/drone_search_system/{subdir_name}")
+        if not os.path.exists(user_data_dir):
+            os.makedirs(user_data_dir)
+        print(f"程序目录不可写，使用用户目录: {user_data_dir}")
+        return user_data_dir
+
+def get_config_file_path(filename):
+    """
+    获取配置文件路径，优先使用程序目录，如果不存在则使用用户目录
+    """
+    app_dir = get_application_directory()
+    config_path = os.path.join(app_dir, filename)
+
+    if os.path.exists(config_path):
+        return config_path
+
+    # 如果程序目录没有配置文件，检查用户目录
+    user_config_path = os.path.expanduser(f"~/drone_search_system/{filename}")
+    if os.path.exists(user_config_path):
+        return user_config_path
+
+    # 如果都不存在，返回程序目录路径（用于创建新文件）
+    return config_path
+
 # 全局常量
 PROCESS_PATTERNS = [
     "sh shfiles/run.sh",
@@ -102,7 +165,7 @@ PROCESS_PATTERNS = [
     "roslaunch exploration_manager exploration.launch",
     "roslaunch yolo_detector yolo_ros.launch",
     "roslaunch sort_ros sort_ros.launch",
-    "python3 marker_wenzi_jisuan.py",
+    "python3 ball_pose_tracker.py",
     "rosrun exploration_manager fuel_nav"
 ]
 
@@ -252,10 +315,8 @@ class MyViz(QMainWindow):
         self.topic_subscriber = None
         self.log_window = None
 
-        # 截图目录
-        self.screenshots_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "screenshots")
-        if not os.path.exists(self.screenshots_dir):
-            os.makedirs(self.screenshots_dir)
+        # 截图目录 - 使用新的路径工具函数
+        self.screenshots_dir = get_data_directory("screenshots")
 
     def _init_ui(self):
         """初始化UI设置"""
@@ -313,6 +374,11 @@ class MyViz(QMainWindow):
         self.main_update_timer.timeout.connect(self._main_update_cycle)
         self.main_update_timer.start(100)  # 10Hz，平衡性能和响应性
 
+        # 图像更新检查定时器 - 确保图像能够及时更新
+        self.image_update_timer = QTimer(self)
+        self.image_update_timer.timeout.connect(self._check_image_update)
+        self.image_update_timer.start(50)  # 20Hz，确保图像更新及时
+
         # 鼠标跟踪定时器
         self.sidebar_hover_timer = QTimer(self)
         self.sidebar_hover_timer.timeout.connect(self.checkMousePosition)
@@ -328,10 +394,12 @@ class MyViz(QMainWindow):
             # 更新状态栏
             self.updateStatusBar()
 
-            # 更新图像显示（降低频率）
-            if self.frame_count % 3 == 0:  # 每300ms更新一次图像
-                self.updateImageDisplay()
-                self.updateBirdViewDisplay()
+            # 移除图像显示的频率限制，让图像能够实时更新
+            # 图像更新现在主要由话题回调函数触发，这里只作为备用更新机制
+            # 注释掉原来的频率限制逻辑
+            # if self.frame_count % 3 == 0:  # 每300ms更新一次图像
+            #     self.updateImageDisplay()
+            #     self.updateBirdViewDisplay()
 
             # 更新悬浮组件数据（降低频率）
             if self.frame_count % 5 == 0:  # 每500ms更新一次悬浮数据
@@ -356,6 +424,34 @@ class MyViz(QMainWindow):
 
         except Exception as e:
             print(f"主更新循环错误: {e}")
+
+    def _check_image_update(self):
+        """检查并更新图像显示 - 确保图像能够及时更新"""
+        try:
+            # 检查是否有图像标签
+            if not hasattr(self, 'image_label') or not self.image_label:
+                return
+
+            # 根据当前模式检查是否有新的图像数据需要显示
+            should_update = False
+
+            if self.current_image_mode == "rgb" and self.camera_image is not None:
+                # 检查RGB图像是否需要更新
+                should_update = True
+            elif self.current_image_mode == "depth" and self.depth_image is not None:
+                # 检查深度图像是否需要更新
+                should_update = True
+
+            # 如果需要更新且当前显示的是占位符文本，则强制更新
+            if should_update:
+                current_pixmap = self.image_label.pixmap()
+                if current_pixmap is None or current_pixmap.isNull():
+                    # 当前没有显示图像，强制更新
+                    self.updateImageDisplay()
+
+        except Exception as e:
+            # 静默处理错误，避免干扰主程序
+            pass
 
     def _update_compass_data(self):
         """更新指南针数据"""
@@ -502,6 +598,8 @@ class MyViz(QMainWindow):
             # 停止所有定时器
             if hasattr(self, 'main_update_timer'):
                 self.main_update_timer.stop()
+            if hasattr(self, 'image_update_timer'):
+                self.image_update_timer.stop()
             if hasattr(self, 'sidebar_hover_timer'):
                 self.sidebar_hover_timer.stop()
 
@@ -1648,10 +1746,7 @@ class MyViz(QMainWindow):
         # 用于存储小球截图的字典 {ball_id: {"path": 文件路径, "timestamp": 时间戳}}
         # 注意：不再存储图像数据，只存储文件路径以避免内存问题
         
-        # 确保截图存储目录存在
-        self.screenshots_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "screenshots")
-        if not os.path.exists(self.screenshots_dir):
-            os.makedirs(self.screenshots_dir)
+        # 截图目录已在初始化时设置，这里不需要重复设置
 
     def calculateAdaptiveSizes(self):
         """根据屏幕分辨率计算自适应尺寸"""
@@ -2486,7 +2581,7 @@ class MyViz(QMainWindow):
             pass  # 静默处理错误
 
     def updateCameraImage(self, camera_data):
-        """处理摄像头图像更新 - 安全版本"""
+        """处理摄像头图像更新 - 优化版本，确保实时更新"""
         try:
             if not camera_data or camera_data["image"] is None:
                 return
@@ -2509,13 +2604,16 @@ class MyViz(QMainWindow):
             # 保存最新图像（创建副本以确保数据安全）
             self.camera_image = image.copy()
 
-            # 如果当前是RGB图像模式，使用信号安全地更新显示
-            if self.current_image_mode == "rgb" and hasattr(self, 'image_label'):
-                if pyqtSignal is not None and hasattr(self, 'image_update_signal'):
-                    self.image_update_signal.emit()
-                else:
-                    # 如果信号不可用，直接调用（可能不安全，但保持兼容性）
-                    self.updateImageDisplay()
+            # 立即更新显示，无论当前模式如何
+            # 这样确保当用户切换到RGB模式时能看到最新的图像
+            if hasattr(self, 'image_label') and self.image_label:
+                if self.current_image_mode == "rgb":
+                    # 如果当前是RGB模式，立即更新显示
+                    if pyqtSignal is not None and hasattr(self, 'image_update_signal'):
+                        self.image_update_signal.emit()
+                    else:
+                        # 如果信号不可用，直接调用更新
+                        self.updateImageDisplay()
 
         except Exception as e:
             print(f"处理图像更新时出错: {str(e)}")
@@ -2523,26 +2621,45 @@ class MyViz(QMainWindow):
             traceback.print_exc()
 
     def updateImageDisplay(self):
-        """更新图像显示 - 优化版本，减少重复代码"""
+        """更新图像显示 - 优化版本，增强调试和错误处理"""
         try:
             if not hasattr(self, 'image_label') or not self.image_label:
+                print("警告: image_label不存在或为None")
                 return
 
             image_data = None
 
-            if self.current_image_mode == "rgb" and self.camera_image is not None:
-                image_data = self.camera_image
-            elif self.current_image_mode == "depth" and self.depth_image is not None:
-                image_data = self._process_depth_image(self.depth_image)
+            # 根据当前模式选择对应的图像数据
+            if self.current_image_mode == "rgb":
+                if self.camera_image is not None:
+                    image_data = self.camera_image
+                    # print(f"使用RGB图像数据，尺寸: {self.camera_image.shape}")
+                else:
+                    # print("RGB模式但camera_image为None")
+                    pass
+            elif self.current_image_mode == "depth":
+                if self.depth_image is not None:
+                    image_data = self._process_depth_image(self.depth_image)
+                    # print(f"使用深度图像数据，原始尺寸: {self.depth_image.shape}")
+                else:
+                    # print("深度模式但depth_image为None")
+                    pass
 
             if image_data is not None:
                 pixmap = self._convert_cv_to_pixmap(image_data)
-                if pixmap:
-                    self._scale_and_set_pixmap('image_label', pixmap)
+                if pixmap and not pixmap.isNull():
+                    success = self._scale_and_set_pixmap('image_label', pixmap)
+                    if success:
+                        # print(f"成功更新{self.current_image_mode}图像显示")
+                        pass
+                    else:
+                        print("警告: 设置图像到标签失败")
+                        self._show_image_placeholder()
                 else:
                     print("警告: 图像转换为QPixmap失败")
                     self._show_image_placeholder()
             else:
+                # print(f"没有可用的{self.current_image_mode}图像数据，显示占位符")
                 self._show_image_placeholder()
 
         except Exception as e:
@@ -3243,10 +3360,8 @@ class MyViz(QMainWindow):
     def startDroneSystem(self):
         """启动无人机系统"""
         try:
-            # 创建日志目录
-            current_dir = os.path.dirname(os.path.abspath(__file__))
-            log_dir = os.path.join(current_dir, "log")
-            os.makedirs(log_dir, exist_ok=True)
+            # 创建日志目录 - 使用新的路径工具函数
+            log_dir = get_data_directory("log")
             timestamp = time.strftime("%Y%m%d_%H%M%S")
             
             # 显示正在启动的消息
@@ -3396,10 +3511,8 @@ class MyViz(QMainWindow):
             
             # 创建位姿转换模块日志文件
             timestamp = time.strftime("%Y%m%d_%H%M%S")
-            # 使用当前目录下的log文件夹
-            current_dir = os.path.dirname(os.path.abspath(__file__))
-            log_dir = os.path.join(current_dir, "log")
-            os.makedirs(log_dir, exist_ok=True)
+            # 使用新的路径工具函数获取日志目录
+            log_dir = get_data_directory("log")
             vins_log = f"{log_dir}/vins_to_mavros_{timestamp}.log"
             self.log_files["vins_to_mavros"] = vins_log
             print(f"位姿转换模块日志文件: {vins_log}")
@@ -3458,10 +3571,8 @@ class MyViz(QMainWindow):
             
             # 创建坐标转换模块日志文件
             timestamp = time.strftime("%Y%m%d_%H%M%S")
-            # 使用当前目录下的log文件夹
-            current_dir = os.path.dirname(os.path.abspath(__file__))
-            log_dir = os.path.join(current_dir, "log")
-            os.makedirs(log_dir, exist_ok=True)
+            # 使用新的路径工具函数获取日志目录
+            log_dir = get_data_directory("log")
             pose_to_odom_log = f"{log_dir}/pose_to_odom_{timestamp}.log"
             self.log_files["pose_to_odom"] = pose_to_odom_log
             print(f"坐标转换模块日志文件: {pose_to_odom_log}")
@@ -3711,10 +3822,8 @@ class MyViz(QMainWindow):
     def executeAdditionalScripts(self):
         """执行额外的启动脚本"""
         try:
-            # 创建日志目录
-            current_dir = os.path.dirname(os.path.abspath(__file__))
-            log_dir = os.path.join(current_dir, "log")
-            os.makedirs(log_dir, exist_ok=True)
+            # 创建日志目录 - 使用新的路径工具函数
+            log_dir = get_data_directory("log")
             timestamp = time.strftime("%Y%m%d_%H%M%S")
             
             # 存储所有日志文件路径
@@ -3840,19 +3949,26 @@ class MyViz(QMainWindow):
 
             # 更新进度
             progress_dialog.setValue(70)
-            progress_dialog.setLabelText("启动标记计算脚本...")
+            progress_dialog.setLabelText("启动目标位置跟踪脚本...")
             QApplication.processEvents()
             time.sleep(3)  # 等待3秒
 
-            # 创建标记计算脚本日志文件
-            marker_log = f"{log_dir}/marker_jisuan_{timestamp}.log"
-            self.log_files["marker_jisuan"] = marker_log
-            print(f"标记计算脚本日志文件: {marker_log}")
+            # 创建小球位置跟踪脚本日志文件
+            ball_tracker_log = f"{log_dir}/ball_pose_tracker_{timestamp}.log"
+            self.log_files["ball_pose_tracker"] = ball_tracker_log
+            print(f"小球位置跟踪脚本日志文件: {ball_tracker_log}")
 
-            # 启动标记计算脚本（后台运行，输出重定向到日志文件）
-            cmd4 = f"cd {zyc_fuel_ws}/scripts && source {zyc_fuel_ws}/devel/setup.bash && python3 marker_wenzi_jisuan.py"
-            with open(marker_log, 'w') as log_file:
-                marker_process = subprocess.Popen(cmd4, shell=True, stdout=log_file, stderr=log_file, executable='/bin/bash')
+            # 获取当前程序目录
+            app_dir = get_application_directory()
+
+            # 启动小球位置跟踪脚本（后台运行，输出重定向到日志文件）
+            cmd4 = f"cd {app_dir} && python3 ball_pose_tracker.py"
+            with open(ball_tracker_log, 'w') as log_file:
+                ball_tracker_process = subprocess.Popen(cmd4, shell=True, stdout=log_file, stderr=log_file, executable='/bin/bash')
+
+            # 将进程添加到进程管理字典中
+            self.processes["ball_tracker"] = ball_tracker_process
+            print(f"小球位置跟踪脚本已启动，PID: {ball_tracker_process.pid}")
 
             # 更新进度
             # progress_dialog.setValue(90)
@@ -3893,10 +4009,8 @@ class MyViz(QMainWindow):
             
             # 保存错误日志
             try:
-                # 使用当前目录下的log文件夹
-                current_dir = os.path.dirname(os.path.abspath(__file__))
-                log_dir = os.path.join(current_dir, "log")
-                os.makedirs(log_dir, exist_ok=True)
+                # 使用新的路径工具函数获取日志目录
+                log_dir = get_data_directory("log")
                 timestamp = time.strftime("%Y%m%d_%H%M%S")
                 error_log = f"{log_dir}/startup_error_{timestamp}.log"
                 with open(error_log, 'w') as log_file:
@@ -3928,39 +4042,56 @@ class MyViz(QMainWindow):
 
     def switchToRGBImage(self):
         """切换到RGB图像模式"""
+        print("切换到RGB图像模式")
         self.rgb_button.setChecked(True)
         self.depth_button.setChecked(False)
         self.current_image_mode = "rgb"
-        # 更新显示
+        # 立即更新显示
         self.updateImageDisplay()
 
     def switchToDepthImage(self):
         """切换到深度图像模式"""
+        print("切换到深度图像模式")
         self.rgb_button.setChecked(False)
         self.depth_button.setChecked(True)
         self.current_image_mode = "depth"
-        # 更新显示
+        # 立即更新显示
         self.updateImageDisplay()
     
     def updateDepthImage(self, depth_data):
-        """处理深度图像更新"""
+        """处理深度图像更新 - 优化版本，确保实时更新"""
         try:
             if not depth_data or depth_data["image"] is None:
                 return
-                
-            # 保存最新深度图像
-            self.depth_image = depth_data["image"]
 
-            # 如果当前是深度图像模式，使用信号安全地更新显示
-            if self.current_image_mode == "depth" and hasattr(self, 'image_label'):
-                if pyqtSignal is not None and hasattr(self, 'image_update_signal'):
-                    self.image_update_signal.emit()
-                else:
-                    # 如果信号不可用，直接调用（可能不安全，但保持兼容性）
-                    self.updateImageDisplay()
-                
+            # 验证深度图像数据的有效性
+            image = depth_data["image"]
+            if not isinstance(image, np.ndarray):
+                print("深度图像数据不是numpy数组")
+                return
+
+            if image.size == 0:
+                print("深度图像数据为空")
+                return
+
+            # 保存最新深度图像（创建副本以确保数据安全）
+            self.depth_image = image.copy()
+
+            # 立即更新显示，无论当前模式如何
+            # 这样确保当用户切换到深度模式时能看到最新的图像
+            if hasattr(self, 'image_label') and self.image_label:
+                if self.current_image_mode == "depth":
+                    # 如果当前是深度模式，立即更新显示
+                    if pyqtSignal is not None and hasattr(self, 'image_update_signal'):
+                        self.image_update_signal.emit()
+                    else:
+                        # 如果信号不可用，直接调用更新
+                        self.updateImageDisplay()
+
         except Exception as e:
             print(f"处理深度图像更新时出错: {str(e)}")
+            import traceback
+            traceback.print_exc()
 
     def updateBirdViewImage(self, bird_view_data):
         """处理鸟瞰图更新"""
@@ -4427,7 +4558,7 @@ class MyViz(QMainWindow):
         """加载小球的预先保存的截图"""
         try:
             # 检查ball_screenshots目录中是否有对应的截图文件
-            ball_screenshots_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ball_screenshots")
+            ball_screenshots_dir = get_data_directory("ball_screenshots")
 
             if not os.path.exists(ball_screenshots_dir):
                 print(f"截图目录不存在: {ball_screenshots_dir}")
@@ -4517,7 +4648,7 @@ class MyViz(QMainWindow):
                 current_progress = 30
                 
                 # 按照启动的相反顺序终止进程
-                process_order = ["planner", "px4ctrl", "detector", "vins", "mavros", "camera"]
+                process_order = ["ball_tracker", "planner", "px4ctrl", "detector", "vins", "mavros", "camera"]
                 
                 for process_name in process_order:
                     if process_name in self.processes and self.processes[process_name]:
@@ -5152,7 +5283,7 @@ class MyViz(QMainWindow):
             # 检查是否有单独启动的进程需要关闭
             if hasattr(self, 'processes') and self.processes:
                 # 按照启动的相反顺序终止进程
-                process_order = ["planner", "px4ctrl", "detector", "vins", "mavros", "camera"]
+                process_order = ["ball_tracker", "planner", "px4ctrl", "detector", "vins", "mavros", "camera"]
                 
                 for process_name in process_order:
                     if process_name in self.processes and self.processes[process_name]:

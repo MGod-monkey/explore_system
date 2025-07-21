@@ -11,6 +11,24 @@ from collections import deque
 import threading
 import time
 
+# ==================== 全局配置参数 ====================
+# 图像缓存相关配置
+MAX_IMAGE_BUFFER_SIZE = 100         # 图像缓冲区最大帧数
+MIN_POSITIONS_FOR_PROCESSING = 3    # 处理位置数据所需的最少帧数
+
+# 检测超时配置
+DETECTION_TIMEOUT_SECONDS = 1.0     # 检测超时时间（秒），超过此时间没有新数据则处理已有数据
+
+# 位置过滤配置
+POSITION_FILTER_STD_MULTIPLIER = 2  # 位置过滤的标准差倍数
+
+# 位置差异阈值配置
+POSITION_THRESHOLD_METERS = 1.5     # 判断是否为同一个小球的位置阈值（米）
+
+# 发布频率配置
+PUBLISH_RATE_HZ = 50               # ROS节点发布频率（Hz）
+# ====================================================
+
 class BallPoseTracker:
     def __init__(self):
         # 初始化 ROS 节点
@@ -35,23 +53,38 @@ class BallPoseTracker:
         self.latest_pose_time = rospy.Time.now()
         
         # 图像缓存相关
-        self.image_buffer = deque(maxlen=100)  # 缓存最近100帧图像
+        self.image_buffer = deque(maxlen=MAX_IMAGE_BUFFER_SIZE)  # 缓存最近N帧图像
         self.current_detection_images = []  # 当前检测期间的图像
         self.is_detecting = False  # 是否正在检测小球
         self.detection_start_time = None
-        
+
         # 位置差异阈值（米）
-        self.position_threshold = 1.5
+        self.position_threshold = POSITION_THRESHOLD_METERS
         
-        # 截图保存目录 - 使用绝对路径指向主程序目录
-        main_program_dir = os.path.expanduser("~/explore_system")
-        self.screenshots_dir = os.path.join(main_program_dir, "ball_screenshots")
-        if not os.path.exists(self.screenshots_dir):
-            os.makedirs(self.screenshots_dir)
-            print(f"创建截图目录: {self.screenshots_dir}")
+        # 截图保存目录 - 使用更智能的路径检测
+        # 首先尝试使用当前工作目录
+        current_dir = os.getcwd()
+        self.screenshots_dir = os.path.join(current_dir, "ball_screenshots")
+
+        # 如果当前目录不可写，使用用户主目录
+        try:
+            if not os.path.exists(self.screenshots_dir):
+                os.makedirs(self.screenshots_dir)
+            # 测试写入权限
+            test_file = os.path.join(self.screenshots_dir, '.write_test')
+            with open(test_file, 'w') as f:
+                f.write('test')
+            os.remove(test_file)
+            print(f"使用截图目录: {self.screenshots_dir}")
+        except (OSError, PermissionError):
+            # 如果当前目录不可写，使用用户主目录
+            self.screenshots_dir = os.path.expanduser("~/explore_system/ball_screenshots")
+            if not os.path.exists(self.screenshots_dir):
+                os.makedirs(self.screenshots_dir)
+            print(f"当前目录不可写，使用用户目录: {self.screenshots_dir}")
 
         # 发布频率
-        self.rate = rospy.Rate(50)
+        self.rate = rospy.Rate(PUBLISH_RATE_HZ)
         
         # 线程锁
         self.lock = threading.Lock()
@@ -132,14 +165,14 @@ class BallPoseTracker:
 
     def process_positions(self):
         """处理位置数据并生成截图"""
-        if len(self.positions) < 3:
+        if len(self.positions) < MIN_POSITIONS_FOR_PROCESSING:
             return None, None
         
         positions_np = np.array(self.positions)
         mean = np.mean(positions_np, axis=0)
         std_dev = np.std(positions_np, axis=0)
 
-        filtered_positions = [pos for pos in positions_np if np.all(np.abs(pos - mean) <= 2 * std_dev)]
+        filtered_positions = [pos for pos in positions_np if np.all(np.abs(pos - mean) <= POSITION_FILTER_STD_MULTIPLIER * std_dev)]
 
         if len(filtered_positions) == 0:
             return None, None
@@ -232,8 +265,8 @@ class BallPoseTracker:
         """主运行循环"""
         while not rospy.is_shutdown():
             with self.lock:
-                # 如果超过1秒没有接收到新的坐标，则处理已有坐标
-                if (rospy.Time.now() - self.latest_pose_time).to_sec() > 1.0 and len(self.positions) > 0:
+                # 如果超过设定时间没有接收到新的坐标，则处理已有坐标
+                if (rospy.Time.now() - self.latest_pose_time).to_sec() > DETECTION_TIMEOUT_SECONDS and len(self.positions) > 0:
                     rospy.loginfo(f"检测结束，处理 {len(self.positions)} 个位置点，缓存了 {len(self.current_detection_images)} 张图像")
                     
                     average_position, screenshot_path = self.process_positions()
