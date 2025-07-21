@@ -43,10 +43,12 @@ class BallPoseTracker:
         # 位置差异阈值（米）
         self.position_threshold = 1.5
         
-        # 截图保存目录
-        self.screenshots_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ball_screenshots")
+        # 截图保存目录 - 使用绝对路径指向主程序目录
+        main_program_dir = os.path.expanduser("~/explore_system")
+        self.screenshots_dir = os.path.join(main_program_dir, "ball_screenshots")
         if not os.path.exists(self.screenshots_dir):
             os.makedirs(self.screenshots_dir)
+            print(f"创建截图目录: {self.screenshots_dir}")
 
         # 发布频率
         self.rate = rospy.Rate(50)
@@ -219,10 +221,10 @@ class BallPoseTracker:
                 pos_data['id'], pos[0], pos[1], pos[2], screenshot_info)
             
             text_marker.scale.z = 1.0
-            text_marker.color.r = 0.0
-            text_marker.color.g = 0.0
-            text_marker.color.b = 0.0
-            text_marker.color.a = 1.0
+            text_marker.color.r = 0.9  # 灰白色 - 红色分量
+            text_marker.color.g = 0.9  # 灰白色 - 绿色分量
+            text_marker.color.b = 0.9  # 灰白色 - 蓝色分量
+            text_marker.color.a = 1.0  # 完全不透明
 
             self.marker_pub.publish(text_marker)
 

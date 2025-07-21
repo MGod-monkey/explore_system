@@ -1,0 +1,13 @@
+[Desktop Entry]
+Name=无人机自主搜索系统
+Name[en]=Drone Search System
+Comment=无人机自主搜索和救援系统
+Comment[en]=Autonomous Drone Search and Rescue System
+Icon=/home/togan/explore_system/drone_search_system_release/logo.png
+Exec=/home/togan/explore_system/drone_search_system_release/run_drone_system.sh
+Type=Application
+Terminal=true
+Categories=Science;Engineering;Robotics;
+StartupNotify=true
+Path=/home/togan/explore_system/drone_search_system_release/
+Keywords=drone;search;rescue;ros;rviz;

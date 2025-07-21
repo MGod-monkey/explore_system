@@ -1,27 +1,30 @@
 #!/usr/bin/env python
 # -*- coding: utf-8 -*-
-## First we start with the standard ros Python import line:
-import roslib; roslib.load_manifest('rviz_python_tutorial')
-import rospy
-from geometry_msgs.msg import PoseStamped
 
-## Then load sys to get sys.argv.
+# 标准库导入
 import sys
 import time
 import os
 import json
-import random
 import math
+import subprocess
+import threading
+from collections import defaultdict
+
+# ROS相关导入
+import roslib; roslib.load_manifest('rviz_python_tutorial')
+import rospy
+from geometry_msgs.msg import PoseStamped
+
+# 第三方库导入
 import numpy as np
 import cv2
-import subprocess  # 添加subprocess模块用于执行命令
 
-# 导入psutil用于进程管理
+# 进程管理库
 try:
     import psutil
 except ImportError:
     print("警告: 未能导入psutil库，进程管理功能将受限")
-    # 尝试自动安装psutil
     try:
         subprocess.call([sys.executable, "-m", "pip", "install", "psutil"])
         import psutil
@@ -29,7 +32,7 @@ except ImportError:
     except:
         print("自动安装psutil失败，请手动安装: pip install psutil")
 
-## 导入我们创建的话题订阅模块、仪表盘组件和话题日志组件
+# 自定义模块导入
 try:
     from topics_subscriber import TopicsSubscriber
 except ImportError:
@@ -37,23 +40,18 @@ except ImportError:
     TopicsSubscriber = None
 
 try:
-    from dashboard import DashBoard, UIButton
+    from dashboard import UIButton
 except ImportError:
     print("无法导入dashboard模块")
-    DashBoard = None
     UIButton = None
-    
+
 try:
     from topic_logger import TopicLogger
 except ImportError:
     print("无法导入topic_logger模块")
     TopicLogger = None
 
-## Next import all the Qt bindings into the current namespace, for
-## convenience.  This uses the "python_qt_binding" package which hides
-## differences between PyQt and PySide, and works if at least one of
-## the two is installed.  The RViz Python bindings use
-## python_qt_binding internally, so you should use it here as well.
+# Qt相关导入
 from python_qt_binding.QtGui import *
 from python_qt_binding.QtCore import *
 try:
@@ -61,208 +59,519 @@ try:
 except ImportError:
     pass
 
-# 确保QTimer和QPropertyAnimation可用
-from python_qt_binding.QtCore import QTimer, QPropertyAnimation, QEasingCurve
+# 尝试导入QTextCodec，如果失败则忽略
+try:
+    from python_qt_binding.QtCore import QTextCodec
+except ImportError:
+    QTextCodec = None
+    print("警告: QTextCodec不可用，跳过编码设置")
 
-## 导入生成的资源文件（图标和图片资源）
+from python_qt_binding.QtCore import QTimer, QPropertyAnimation, QEasingCurve
+try:
+    from python_qt_binding.QtCore import pyqtSignal
+except ImportError:
+    try:
+        from PyQt5.QtCore import pyqtSignal
+    except ImportError:
+        try:
+            from PyQt4.QtCore import pyqtSignal
+        except ImportError:
+            print("警告: 无法导入pyqtSignal，某些功能可能不可用")
+            pyqtSignal = None
+
+# 资源文件导入
 try:
     import images_rc
 except ImportError:
     print("警告: 无法导入images_rc资源文件，请确保已使用pyrcc5编译资源文件")
 
-## Finally import the RViz bindings themselves.
+# RViz导入
 from rviz import bindings as rviz
 
-## The MyViz class is the main container widget.
-class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
+# 全局常量
+PROCESS_PATTERNS = [
+    "sh shfiles/run.sh",
+    "roslaunch mavros px4.launch",
+    "roslaunch vins fast_drone_250.launch",
+    "roslaunch onboard_detector run_detector.launch",
+    "roslaunch px4ctrl run_ctrl.launch",
+    "roslaunch ego_planner single_run_in_exp.launch",
+    "roslaunch realsense2_camera rs_camera.launch",
+    "vins_to_mavros_node",
+    "pose_to_odom_converter_node",
+    "roslaunch exploration_manager exploration.launch",
+    "roslaunch yolo_detector yolo_ros.launch",
+    "roslaunch sort_ros sort_ros.launch",
+    "python3 marker_wenzi_jisuan.py",
+    "rosrun exploration_manager fuel_nav"
+]
 
-    ## MyViz Constructor
-    ## ^^^^^^^^^^^^^^^^^
-    ##
-    ## Its constructor creates and configures all the component widgets:
-    ## frame, thickness_slider, top_button, and side_button, and adds them
-    ## to layouts.
+# 全局样式常量
+GLOBAL_STYLES = {
+    'main_window': """
+        QWidget {
+            background-color: #1E2330;
+            color: #FFFFFF;
+        }
+        QMainWindow::title {
+            height: 35px;
+        }
+        QToolBar {
+            background-color: #1A202C;
+            border: none;
+            spacing: 10px;
+            padding: 5px;
+        }
+        QStatusBar {
+            background-color: #1A202C;
+            color: #FFFFFF;
+        }
+    """,
+    'button_primary': """
+        QPushButton {{
+            background-color: #2C3E50;
+            color: #FFFFFF;
+            border: none;
+            border-radius: 4px;
+            padding: 6px 12px;
+            font-weight: bold;
+            min-width: {min_width}px;
+            min-height: {min_height}px;
+        }}
+        QPushButton:hover {{
+            background-color: #3498DB;
+        }}
+        QPushButton:pressed {{
+            background-color: #2980B9;
+        }}
+    """,
+    'groupbox': """
+        QGroupBox {
+            color: #3498DB;
+            font-weight: bold;
+            border: 1px solid #3498DB;
+            border-radius: 5px;
+            padding: 10px;
+            margin-top: 10px;
+        }
+        QGroupBox::title {
+            subcontrol-origin: margin;
+            subcontrol-position: top center;
+            padding: 0 5px;
+        }
+    """,
+    'label': """
+        QLabel {
+            font-size: 12pt;
+            font-weight: bold;
+            padding: 5px;
+        }
+    """
+}
+
+class MyViz(QMainWindow):
+    """无人机自主搜索系统主窗口类"""
+
+    # 定义信号，用于线程安全的UI更新（如果pyqtSignal可用）
+    if pyqtSignal is not None:
+        image_update_signal = pyqtSignal()
+        bird_view_update_signal = pyqtSignal()
+
     def __init__(self):
-        QMainWindow.__init__(self)  # 初始化QMainWindow
+        super(MyViz, self).__init__()
 
-        # 获取屏幕信息，用于自适应布局
+        # 初始化基本属性
+        self._init_basic_attributes()
+
+        # 初始化UI
+        self._init_ui()
+
+        # 初始化RViz
+        self._init_rviz()
+
+        # 创建布局
+        self._create_layouts()
+
+        # 初始化定时器（合并多个定时器）
+        self._init_timers()
+
+        # 连接信号到槽函数（如果信号可用）
+        if pyqtSignal is not None and hasattr(self, 'image_update_signal'):
+            self.image_update_signal.connect(self.updateImageDisplay)
+            self.bird_view_update_signal.connect(self.updateBirdViewDisplay)
+
+        # 延迟初始化话题订阅器
+        QTimer.singleShot(2000, self.setupTopicSubscriber)
+
+    def _init_basic_attributes(self):
+        """初始化基本属性"""
+        # 获取屏幕信息
         self.desktop = QDesktopWidget()
         self.screen_geometry = self.desktop.availableGeometry(self.desktop.primaryScreen())
         self.screen_width = self.screen_geometry.width()
         self.screen_height = self.screen_geometry.height()
         print(f"检测到屏幕分辨率: {self.screen_width}x{self.screen_height}")
 
-        # 根据屏幕分辨率计算自适应尺寸
+        # 计算自适应尺寸
         self.calculateAdaptiveSizes()
 
-        # 电池状态变量
+        # 数据变量
         self.battery_percentage = 100.0
-        self.battery_voltage = 12.0  # 默认电压值
-
-        # 设置中文字体支持
-        font = QFont("WenQuanYi Micro Hei", 10)
-        QApplication.setFont(font)
-
-        # 设置应用图标
-        icon = QIcon("logo.png")
-        self.setWindowIcon(icon)
-        
-        # 图像显示相关变量
+        self.battery_voltage = 12.0
         self.camera_image = None
         self.depth_image = None
         self.bird_view_image = None
-        
-        # 姿态数据
         self.pitch = 0
         self.roll = 0
-        
-        # 存储已检测到的标记点ID，避免重复添加
+        self.speed = 0
+        self.linear_speed = 0
+        self.angular_speed = 0
+
+        # 状态变量
         self.detected_markers = set()
-        
-        # 话题数据标志，标记话题是否有实际数据
-        self.topics_with_data = {
-            "battery": False,
-            "status": False,
-            "odometry": False,
-            "velocity": False,
-            "camera": False,
-            "depth": False,
-            "bird_view": False,
-            "marker": False
-        }
-        
-        # 添加关闭事件处理
-        # 正确设置关闭事件处理
-        
-        # 设置窗口标题
+        self.topics_with_data = defaultdict(bool)
+        self.current_image_mode = "rgb"
+        self.ball_screenshots = {}
+
+        # UI状态变量
+        self.sidebar_expanded = True
+        self.right_sidebar_expanded = True
+        self.left_sidebar_pinned = False
+        self.right_sidebar_pinned = False
+        self.enable_sidebar_hover = False
+
+        # 进程管理
+        self.processes = {}
+        self.log_files = {}
+
+        # 帧率计算
+        self.frame_count = 0
+        self.last_frame_time = time.time()
+
+        # 话题订阅器
+        self.topic_subscriber = None
+        self.log_window = None
+
+        # 截图目录
+        self.screenshots_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "screenshots")
+        if not os.path.exists(self.screenshots_dir):
+            os.makedirs(self.screenshots_dir)
+
+    def _init_ui(self):
+        """初始化UI设置"""
+        # 设置字体
+        font = QFont("WenQuanYi Micro Hei", 10)
+        QApplication.setFont(font)
+
+        # 设置图标和标题
+        self.setWindowIcon(QIcon("logo.png"))
         self.setWindowTitle("无人机自主搜索系统")
-        
+
         # 创建中央控件
         self.central_widget = QWidget()
         self.setCentralWidget(self.central_widget)
-        
-        # 添加窗口resize事件处理
+
+        # 设置全局样式
+        self.setStyleSheet(GLOBAL_STYLES['main_window'])
+
+        # 设置窗口最小尺寸
+        min_width = self.adaptive_left_width + self.adaptive_right_width + 500
+        min_height = 600
+        self.setMinimumSize(min_width, min_height)
+
+        # 绑定事件
         self.resizeEvent = self.onResize
-        
-        # 设置窗口样式，使用黑蓝色调
-        self.setStyleSheet("""
-            QWidget {
-                background-color: #1E2330;
-                color: #FFFFFF;
-            }
-            QPushButton {
-                background-color: #2C3E50;
-                color: #FFFFFF;
-                border: none;
-                border-radius: 4px;
-                padding: 6px 12px;
-                font-weight: bold;
-                min-width: 120px;
-                min-height: 30px;
-            }
-            QPushButton:hover {
-                background-color: #3498DB;
-            }
-            QPushButton:pressed {
-                background-color: #2980B9;
-            }
-            QGroupBox {
-                color: #3498DB;
-                font-weight: bold;
-                border: 1px solid #3498DB;
-                border-radius: 5px;
-                padding: 10px;
-                margin-top: 10px;
-            }
-            QGroupBox::title {
-                subcontrol-origin: margin;
-                subcontrol-position: top center;
-                padding: 0 5px;
-            }
-            QLabel {
-                font-size: 12pt;
-                font-weight: bold;
-                padding: 5px;
-            }
-            QMainWindow::title {
-                height: 35px;
-            }
-            QToolBar {
-                background-color: #1A202C;
-                border: none;
-                spacing: 10px;
-                padding: 5px;
-            }
-            QToolButton {
-                background-color: #2C3E50;
-                color: #FFFFFF;
-                border: none;
-                border-radius: 4px;
-                padding: 5px;
-                min-width: 30px;
-                min-height: 30px;
-            }
-            QToolButton:hover {
-                background-color: #3498DB;
-            }
-            QToolButton:pressed {
-                background-color: #2980B9;
-            }
-            QStatusBar {
-                background-color: #1A202C;
-                color: #FFFFFF;
-            }
-        """)
-        
-        # 初始化话题订阅器变量（确保此变量先被定义）
-        self.topic_subscriber = None
-        
+    def _init_rviz(self):
+        """初始化RViz组件"""
         # 设置RViz显示
         self.frame = rviz.VisualizationFrame()
         self.frame.setSplashPath("")
         self.frame.initialize()
-        
-        # 读取配置文件
-        reader = rviz.YamlConfigReader()
-        config = rviz.Config()
-        reader.readFile(config, "my_config.rviz")
-        self.frame.load(config)
-        
-        # 继续其他初始化...
-        
-        # 初始化日志窗口
-        self.log_window = None
-        
-        # 添加标志，控制是否启用鼠标跟踪和侧栏是否固定
-        self.enable_sidebar_hover = False
-        self.left_sidebar_pinned = False
-        self.right_sidebar_pinned = False
-        
-        # 创建鼠标跟踪区域定时器，用于检测鼠标位置
-        self.sidebar_hover_timer = QTimer(self)
-        self.sidebar_hover_timer.timeout.connect(self.checkMousePosition)
-        self.sidebar_hover_timer.start(50)  # 每50ms检查一次鼠标位置，提高响应速度
-        
-        # 使用定时器延迟创建悬浮窗口，确保主窗口和RViz框架已完全显示
-        # 先创建悬浮窗口，然后再自动隐藏左侧栏，避免冲突
-        QTimer.singleShot(1000, self.setupAllOverlaysAndHideSidebar)
 
-        ## 禁用菜单栏、状态栏和"隐藏停靠"按钮
+        # 读取配置文件
+        try:
+            reader = rviz.YamlConfigReader()
+            config = rviz.Config()
+            reader.readFile(config, "my_config.rviz")
+            self.frame.load(config)
+        except Exception as e:
+            print(f"加载RViz配置文件失败: {e}")
+
+        # 禁用菜单栏、状态栏和"隐藏停靠"按钮
         self.frame.setMenuBar(None)
         self.frame.setStatusBar(None)
         self.frame.setHideButtonVisibility(True)
 
-        ## 获取VisualizationManager实例
+        # 获取VisualizationManager实例
         self.manager = self.frame.getManager()
         self.grid_display = self.manager.getRootDisplayGroup().getDisplayAt(0)
-        
 
-        
+    def _init_timers(self):
+        """初始化定时器（合并多个定时器以减少资源占用）"""
+        # 主更新定时器 - 合并多个高频更新
+        self.main_update_timer = QTimer(self)
+        self.main_update_timer.timeout.connect(self._main_update_cycle)
+        self.main_update_timer.start(100)  # 10Hz，平衡性能和响应性
+
+        # 鼠标跟踪定时器
+        self.sidebar_hover_timer = QTimer(self)
+        self.sidebar_hover_timer.timeout.connect(self.checkMousePosition)
+        self.sidebar_hover_timer.start(100)  # 降低频率到100ms
+
+        # 延迟初始化定时器
+        QTimer.singleShot(1000, self.setupAllOverlaysAndHideSidebar)
+        QTimer.singleShot(1000, self.updateImageSizes)
+
+    def _main_update_cycle(self):
+        """主更新循环 - 合并多个更新操作"""
+        try:
+            # 更新状态栏
+            self.updateStatusBar()
+
+            # 更新图像显示（降低频率）
+            if self.frame_count % 3 == 0:  # 每300ms更新一次图像
+                self.updateImageDisplay()
+                self.updateBirdViewDisplay()
+
+            # 更新悬浮组件数据（降低频率）
+            if self.frame_count % 5 == 0:  # 每500ms更新一次悬浮数据
+                # RViz悬浮面板数据现在直接在话题回调中更新，无需在此处调用
+                # self.updateOverlayData()
+                # 更新指南针和姿态组件数据
+                self._update_compass_data()
+                self._update_attitude_widget_data()
+
+            # 更新悬浮组件位置（降低频率）
+            if self.frame_count % 2 == 0:  # 每200ms更新一次位置
+                # 检查RViz框架是否存在且有效
+                if hasattr(self, 'frame') and self.frame and self.frame.isVisible():
+                    if hasattr(self, 'rviz_overlay') and hasattr(self, 'updateOverlayPosition'):
+                        self.updateOverlayPosition()
+                    if hasattr(self, 'compass') and hasattr(self, 'updateCompassPosition'):
+                        self.updateCompassPosition()
+                    if hasattr(self, 'attitude_widget') and hasattr(self, 'updateAttitudeWidgetPosition'):
+                        self.updateAttitudeWidgetPosition()
+
+            self.frame_count += 1
+
+        except Exception as e:
+            print(f"主更新循环错误: {e}")
+
+    def _update_compass_data(self):
+        """更新指南针数据"""
+        try:
+            if hasattr(self, 'topic_subscriber') and self.topic_subscriber and hasattr(self, 'compass') and self.compass:
+                # 检查姿态话题是否活跃
+                if self.topic_subscriber.is_topic_active("attitude"):
+                    # 尝试从姿态数据获取航向信息
+                    attitude_data = self.topic_subscriber.get_latest_data("attitude")
+                    if attitude_data and "yaw" in attitude_data:
+                        # 获取原始yaw值
+                        yaw_value = attitude_data.get("yaw", 0)
+                        if isinstance(yaw_value, list):
+                            if len(yaw_value) > 0:
+                                yaw_value = yaw_value[0]  # 取列表的第一个元素
+                            else:
+                                yaw_value = 0  # 空列表时使用默认值
+
+                        # 限制在360度范围内
+                        if yaw_value > 360:
+                            yaw_value = yaw_value % 360
+                        elif yaw_value < -360:
+                            yaw_value = yaw_value % 360
+
+                        # 直接使用yaw值作为指南针角度
+                        self.compass.set_heading(-yaw_value)
+
+        except Exception as e:
+            print(f"更新指南针数据时出错: {str(e)}")
+
+    def _update_attitude_widget_data(self):
+        """更新姿态指示器数据"""
+        try:
+            if hasattr(self, 'topic_subscriber') and self.topic_subscriber and hasattr(self, 'attitude_widget') and self.attitude_widget:
+                # 检查姿态话题是否活跃
+                if self.topic_subscriber.is_topic_active("attitude"):
+                    # 从姿态数据获取俯仰和滚转角度
+                    attitude_data = self.topic_subscriber.get_latest_data("attitude")
+                    if attitude_data:
+                        # 获取俯仰角并检查是否为列表
+                        pitch_value = attitude_data.get("pitch", 0)
+                        if isinstance(pitch_value, list):
+                            if len(pitch_value) > 0:
+                                pitch_value = pitch_value[0]
+                            else:
+                                pitch_value = 0
+
+                        # 获取滚转角并检查是否为列表
+                        roll_value = attitude_data.get("roll", 0)
+                        if isinstance(roll_value, list):
+                            if len(roll_value) > 0:
+                                roll_value = roll_value[0]
+                            else:
+                                roll_value = 0
+
+                        # 更新姿态指示器
+                        self.attitude_widget.update_attitude(pitch_value, roll_value)
+
+        except Exception as e:
+            print(f"更新姿态指示器数据时出错: {str(e)}")
+
+    def _update_overlay_positions(self):
+        """立即更新所有悬浮窗口位置"""
+        try:
+            # 确保RViz框架已经完成布局更新
+            if hasattr(self, 'frame') and self.frame:
+                # 强制更新RViz框架的几何信息
+                self.frame.update()
+                QApplication.processEvents()
+
+            # 更新各个悬浮窗口位置
+            if hasattr(self, 'updateOverlayPosition'):
+                self.updateOverlayPosition()
+            if hasattr(self, 'updateCompassPosition'):
+                self.updateCompassPosition()
+            if hasattr(self, 'updateAttitudeWidgetPosition'):
+                self.updateAttitudeWidgetPosition()
+        except Exception as e:
+            print(f"更新悬浮窗口位置时出错: {e}")
+
+    def _create_styled_button(self, text, style_type="primary", min_width=120, min_height=30):
+        """创建带样式的按钮，减少重复代码"""
+        button = QPushButton(text)
+
+        if style_type == "primary":
+            style = GLOBAL_STYLES['button_primary'].format(
+                min_width=min_width,
+                min_height=min_height
+            )
+        else:
+            # 可以扩展其他样式类型
+            style = GLOBAL_STYLES['button_primary'].format(
+                min_width=min_width,
+                min_height=min_height
+            )
+
+        button.setStyleSheet(style)
+        return button
+
+    def _safe_execute(self, func, error_msg="操作执行失败", *args, **kwargs):
+        """安全执行函数，统一错误处理"""
+        try:
+            return func(*args, **kwargs)
+        except Exception as e:
+            print(f"{error_msg}: {str(e)}")
+            return None
+
+    def _update_label_safely(self, label, text, default_text="数据获取失败"):
+        """安全更新标签文本"""
+        try:
+            if hasattr(self, label) and getattr(self, label):
+                getattr(self, label).setText(text)
+        except Exception as e:
+            print(f"更新标签 {label} 失败: {e}")
+            if hasattr(self, label) and getattr(self, label):
+                getattr(self, label).setText(default_text)
+
+    def _scale_and_set_pixmap(self, label_name, pixmap, width=None, height=None):
+        """统一的图像缩放和设置函数"""
+        if not hasattr(self, label_name) or not getattr(self, label_name):
+            return False
+
+        try:
+            label = getattr(self, label_name)
+            if width is None:
+                width = self.adaptive_image_width
+            if height is None:
+                height = self.adaptive_image_height
+
+            scaled_pixmap = pixmap.scaled(
+                width, height,
+                Qt.KeepAspectRatio,
+                Qt.SmoothTransformation
+            )
+            label.setPixmap(scaled_pixmap)
+            return True
+        except Exception as e:
+            print(f"设置图像到 {label_name} 失败: {e}")
+            return False
+
+    def _cleanup_resources(self):
+        """清理资源，减少内存泄漏"""
+        try:
+            # 停止所有定时器
+            if hasattr(self, 'main_update_timer'):
+                self.main_update_timer.stop()
+            if hasattr(self, 'sidebar_hover_timer'):
+                self.sidebar_hover_timer.stop()
+
+            # 清理图像数据
+            self.camera_image = None
+            self.depth_image = None
+            self.bird_view_image = None
+
+            # 清理话题订阅器
+            if self.topic_subscriber:
+                self.topic_subscriber = None
+
+            # 清理动画对象
+            if hasattr(self, 'sidebar_animation'):
+                try:
+                    self.sidebar_animation.finished.disconnect()
+                    self.sidebar_animation.valueChanged.disconnect()
+                    self.sidebar_animation.stop()
+                    self.sidebar_animation.deleteLater()
+                except:
+                    pass
+
+            if hasattr(self, 'right_sidebar_animation'):
+                try:
+                    self.right_sidebar_animation.finished.disconnect()
+                    self.right_sidebar_animation.valueChanged.disconnect()
+                    self.right_sidebar_animation.stop()
+                    self.right_sidebar_animation.deleteLater()
+                except:
+                    pass
+
+            print("资源清理完成")
+        except Exception as e:
+            print(f"资源清理时出错: {e}")
+
+    def closeEvent(self, event):
+        """窗口关闭事件处理 - 优化版本"""
+        try:
+            print("正在关闭应用程序...")
+
+            # 清理资源
+            self._cleanup_resources()
+
+            # 关闭悬浮窗口
+            if hasattr(self, 'overlay_widget') and self.overlay_widget:
+                self.overlay_widget.close()
+            if hasattr(self, 'compass') and self.compass:
+                self.compass.close()
+            if hasattr(self, 'attitude_widget') and self.attitude_widget:
+                self.attitude_widget.close()
+            if hasattr(self, 'log_window') and self.log_window:
+                self.log_window.close()
+
+            # 终止进程
+            self._safe_execute(self.silentStopDroneSystem, "停止进程失败")
+
+            # 接受关闭事件
+            event.accept()
+
+        except Exception as e:
+            print(f"关闭事件处理失败: {e}")
+            event.accept()  # 即使出错也要关闭
+
+    def _create_layouts(self):
+        """创建主要布局"""
         ## 创建主布局
         main_layout = QVBoxLayout(self.central_widget)
         main_layout.setContentsMargins(10, 15, 10, 10)  # 增加上边距
         main_layout.setSpacing(10)  # 增加组件间距
-        
+
         ## 创建标题和工具栏区域
         header_widget = QWidget()
         header_widget.setStyleSheet("background-color: #1A202C; border-radius: 5px;")
@@ -287,7 +596,7 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         
         # 左侧功能按钮
         function_layout = QHBoxLayout()
-        function_layout.setSpacing(15)  # 增加按钮间距
+        function_layout.setSpacing(8)  # 减少按钮间距
         
         # # 启动程序按钮
         # start_button = QPushButton("启动程序")
@@ -354,7 +663,7 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         
         # 右侧状态显示
         status_layout = QHBoxLayout()
-        status_layout.setSpacing(15)
+        status_layout.setSpacing(8)  # 减少状态组件间距
         
         # 电池状态显示
         self.battery_icon_label = QLabel()
@@ -416,8 +725,8 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
             }
         """)
         status_group_layout = QVBoxLayout(status_group)
-        status_group_layout.setContentsMargins(12, 25, 12, 12)
-        status_group_layout.setSpacing(15)
+        status_group_layout.setContentsMargins(0, 0, 0, 0)  # 进一步减少内边距
+        status_group_layout.setSpacing(4)  # 进一步减少组件间距
 
         # 创建无人机状态信息容器，使用现代化卡片布局
         info_container = QWidget()
@@ -432,8 +741,8 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
             }
         """)
         info_layout = QVBoxLayout(info_container)
-        info_layout.setContentsMargins(15, 15, 15, 15)
-        info_layout.setSpacing(12)
+        info_layout.setContentsMargins(3, 3, 3, 3)  # 进一步减少内边距
+        info_layout.setSpacing(3)  # 进一步减少组件间距
         
         # 创建状态卡片容器
         self.createStatusCards(info_layout)
@@ -445,9 +754,28 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         left_sidebar_layout.addWidget(status_group, 3)  # 增加拉伸系数，给状态组更多空间
 
         # 添加功能区域组件（与状态区分离）
-        function_group = QGroupBox("控制中心")
-        function_group.setStyleSheet("color: #3498DB; font-size: 14pt; margin-top: 15px;")  # 设置标题样式并增加顶部边距
-        function_group.setTitle("  控制中心  ")  # 通过增加空格让标题文字有更多显示空间
+        function_group = QGroupBox("🎮 控制中心")
+        function_group.setStyleSheet("""
+            QGroupBox {
+                color: #3498DB;
+                font-size: 16pt;
+                font-weight: bold;
+                border: 2px solid #3498DB;
+                border-radius: 12px;
+                padding: 15px;
+                margin-top: 20px;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 rgba(52, 152, 219, 0.1),
+                    stop:1 rgba(26, 32, 44, 0.8));
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                subcontrol-position: top center;
+                padding: 0 10px;
+                background-color: #1E2330;
+                border-radius: 6px;
+            }
+        """)
         function_group.setObjectName("function_group")  # 设置对象名，方便后续查找
         self.function_group = function_group  # 保存引用
         function_group_layout = QVBoxLayout(function_group)
@@ -503,7 +831,7 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
             function_grid = QWidget()
             function_layout = QGridLayout(function_grid)
             function_layout.setContentsMargins(5, 2, 5, 2)  # 减小内边距
-            function_layout.setSpacing(5)  # 减小组件间距
+            function_layout.setSpacing(3)  # 进一步减小组件间距
             
             # 创建上方按钮 - 一键返航
             return_home_btn = QPushButton("一键返航")
@@ -822,7 +1150,6 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         self.right_sidebar = QWidget()
         self.right_sidebar.setFixedWidth(self.adaptive_right_width)  # 使用自适应宽度
         # 使右侧栏可以在垂直方向调整大小
-        self.right_sidebar.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
         self.right_sidebar.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)  # 设置固定宽度策略
         right_sidebar_layout = QVBoxLayout(self.right_sidebar)
         right_sidebar_layout.setContentsMargins(5, 5, 5, 5)  # 设置较小的边距
@@ -837,13 +1164,33 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         right_sidebar_layout.addSpacing(10)
         
         # 添加待搜索人员位置窗口
-        person_position_group = QGroupBox("待搜索人员位置")
-        person_position_group.setStyleSheet("color: #3498DB; font-size: 14pt;")  # 设置标题样式
+        person_position_group = QGroupBox("📍 待搜索人员位置")
+        person_position_group.setStyleSheet("""
+            QGroupBox {
+                color: #3498DB;
+                font-size: 16pt;
+                font-weight: bold;
+                border: 2px solid #3498DB;
+                border-radius: 12px;
+                padding: 15px;
+                margin-top: 20px;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 rgba(52, 152, 219, 0.1),
+                    stop:1 rgba(26, 32, 44, 0.8));
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                subcontrol-position: top center;
+                padding: 0 10px;
+                background-color: #1E2330;
+                border-radius: 6px;
+            }
+        """)  # 设置标题样式
         # 设置大小策略为垂直方向可扩展
         person_position_group.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
         person_position_layout = QVBoxLayout(person_position_group)
-        person_position_layout.setContentsMargins(10, 20, 10, 10)  # 增加内边距
-        person_position_layout.setSpacing(10)  # 减少组件间距以节省空间
+        person_position_layout.setContentsMargins(0, 0, 0, 0)  # 进一步减少内边距
+        person_position_layout.setSpacing(3)  # 进一步减少组件间距以节省空间
         
         # 创建位置显示区域
         position_frame = QFrame()
@@ -852,7 +1199,7 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         # 设置Frame可扩展
         position_frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         position_frame_layout = QVBoxLayout(position_frame)
-        position_frame_layout.setContentsMargins(10, 10, 10, 10)
+        position_frame_layout.setContentsMargins(0, 0, 0, 0)  # 进一步减少内边距
         
         # 创建位置信息表格
         self.position_table = QTableWidget()
@@ -870,12 +1217,12 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
             QHeaderView::section {
                 background-color: #2C3E50;
                 color: white;
-                padding: 5px;
+                padding: 0px;
                 border: 1px solid #3498DB;
             }
             QTableWidget::item {
                 border-bottom: 1px solid #3498DB;
-                padding: 5px;
+                padding: 0px;
             }
             QTableWidget::item:selected {
                 background-color: #3498DB;
@@ -884,8 +1231,8 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         # 设置表格列宽策略，避免横向滚动条
         self.setupTableColumnWidths()
         self.position_table.verticalHeader().setVisible(False)
-        # 设置表格可扩展，但有最小高度限制
-        self.position_table.setMinimumHeight(120)
+        # 设置表格可扩展，减少最小高度以更好填充空间
+        self.position_table.setMinimumHeight(100)
         # 不设置最大高度限制，允许根据可用空间自动调整
         self.position_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         # 禁用横向滚动条
@@ -900,8 +1247,8 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         # 添加操作按钮区域
         button_container = QWidget()
         button_layout = QHBoxLayout(button_container)
-        button_layout.setContentsMargins(0, 5, 0, 0)
-        button_layout.setSpacing(10)
+        button_layout.setContentsMargins(0, 0, 0, 0)  # 减少顶部边距
+        button_layout.setSpacing(3)  # 进一步减少按钮间距
         
         # 添加按钮
         add_btn = QPushButton("添加")
@@ -968,73 +1315,227 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         image_display_layout.setContentsMargins(0, 0, 0, 0)
         image_display_layout.setSpacing(0)  # 去除组件间距
         
-        # 创建鸟瞰图显示区域
-        bird_view_container = QWidget()
-        bird_view_layout = QVBoxLayout(bird_view_container)
-        bird_view_layout.setContentsMargins(0, 0, 0, 0)
+        # 创建鸟瞰图显示区域 - 现代化卡片设计
+        bird_view_group = QGroupBox("🗺️ 障碍物鸟瞰图")
+        bird_view_group.setStyleSheet("""
+            QGroupBox {
+                color: #3498DB;
+                font-size: 12pt;
+                font-weight: bold;
+                border: 2px solid #3498DB;
+                border-radius: 8px;
+                padding: 8px;
+                margin-top: 15px;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 rgba(52, 152, 219, 0.1),
+                    stop:1 rgba(26, 32, 44, 0.8));
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                subcontrol-position: top center;
+                padding: 0 8px;
+                background-color: #1E2330;
+                border-radius: 4px;
+            }
+        """)
+        bird_view_layout = QVBoxLayout(bird_view_group)
+        bird_view_layout.setContentsMargins(0, 0, 0, 0)  # 进一步减少内边距
         bird_view_layout.setSpacing(0)
-        
-        # 鸟瞰图标签
-        bird_view_title = QLabel("障碍物鸟瞰图")
-        bird_view_title.setStyleSheet("font-size: 10pt; font-weight: bold; color: #3498DB; background-color: #2C3E50; padding: 5px;")
-        bird_view_title.setAlignment(Qt.AlignCenter)
-        bird_view_title.setFixedHeight(30)
-        bird_view_layout.addWidget(bird_view_title)
-        
+
+        # 鸟瞰图显示容器
+        bird_view_frame = QFrame()
+        bird_view_frame.setFrameShape(QFrame.StyledPanel)
+        bird_view_frame.setStyleSheet("""
+            QFrame {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 rgba(44, 62, 80, 0.9),
+                    stop:1 rgba(26, 32, 44, 0.9));
+                border-radius: 6px;
+                border: 1px solid rgba(52, 152, 219, 0.3);
+            }
+        """)
+        bird_view_frame_layout = QVBoxLayout(bird_view_frame)
+        bird_view_frame_layout.setContentsMargins(0, 0, 0, 0)  # 进一步减少内边距
+        bird_view_frame_layout.setSpacing(0)
+
         # 鸟瞰图显示
         self.bird_view_label = QLabel()
         self.bird_view_label.setAlignment(Qt.AlignCenter)
-        self.bird_view_label.setFixedSize(self.adaptive_image_width, self.adaptive_bird_height)  # 使用自适应尺寸
-        self.bird_view_label.setStyleSheet("background-color: #1A202C; border: 1px solid #3498DB; border-top: none;")
+        self.bird_view_label.setFixedSize(self.adaptive_image_width - 16, self.adaptive_bird_height - 10)  # 调整尺寸适应新布局
+        self.bird_view_label.setStyleSheet("""
+            QLabel {
+                background-color: #1A202C;
+                border: 1px solid #3498DB;
+                border-radius: 4px;
+                color: #FFFFFF;
+                font-size: 10pt;
+            }
+        """)
         self.bird_view_label.setText("等待鸟瞰图数据...")
         self.bird_view_label.setScaledContents(True)  # 启用内容缩放
-        bird_view_layout.addWidget(self.bird_view_label)
+        bird_view_frame_layout.addWidget(self.bird_view_label, 0, Qt.AlignCenter)
+
+        bird_view_layout.addWidget(bird_view_frame)
         
-        # 添加鸟瞰图容器到图像显示容器
-        image_display_layout.addWidget(bird_view_container)
+        # 添加鸟瞰图组到图像显示容器
+        image_display_layout.addWidget(bird_view_group)
         
         # 添加一个小间隔
         spacer = QWidget()
-        spacer.setFixedHeight(5)  # 减小间隔
+        spacer.setFixedHeight(8)
         image_display_layout.addWidget(spacer)
-        
-        # 创建按钮区域 - 平行四边形按钮
-        button_container = QWidget()
+
+        # 创建图像显示组 - 现代化卡片设计
+        image_group = QGroupBox("📷 实时图像")
+        image_group.setStyleSheet("""
+            QGroupBox {
+                color: #3498DB;
+                font-size: 12pt;
+                font-weight: bold;
+                border: 2px solid #3498DB;
+                border-radius: 8px;
+                padding: 8px;
+                margin-top: 15px;
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 rgba(52, 152, 219, 0.1),
+                    stop:1 rgba(26, 32, 44, 0.8));
+            }
+            QGroupBox::title {
+                subcontrol-origin: margin;
+                subcontrol-position: top center;
+                padding: 0 8px;
+                background-color: #1E2330;
+                border-radius: 4px;
+            }
+        """)
+        image_group_layout = QVBoxLayout(image_group)
+        image_group_layout.setContentsMargins(0, 0, 0, 0)  # 进一步减少内边距
+        image_group_layout.setSpacing(0)  # 进一步减少组件间距
+
+        # 创建按钮区域 - 现代化切换按钮
+        button_container = QFrame()
+        button_container.setFrameShape(QFrame.StyledPanel)
+        button_container.setStyleSheet("""
+            QFrame {
+                background-color: #2C3E50;
+                border-radius: 6px;
+                border: 1px solid rgba(52, 152, 219, 0.3);
+            }
+        """)
         button_layout = QHBoxLayout(button_container)
-        button_layout.setContentsMargins(0, 0, 0, 0)
-        button_layout.setSpacing(0)  # 按钮之间无间距
-        
-        # 设置按钮容器高度
-        button_container.setFixedHeight(30)
-        
-        # RGB图像按钮 - 深色
+        button_layout.setContentsMargins(0, 0, 0, 0)  # 进一步减少内边距
+        button_layout.setSpacing(0)  # 进一步减少按钮间距
+
+        # RGB图像按钮 - 现代化设计
         self.rgb_button = QPushButton("RGB图像")
         self.rgb_button.setCheckable(True)
         self.rgb_button.setChecked(True)
         self.rgb_button.clicked.connect(self.switchToRGBImage)
+        self.rgb_button.setStyleSheet("""
+            QPushButton {
+                background-color: #27AE60;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                padding: 6px 12px;
+                font-weight: bold;
+                font-size: 10pt;
+                min-height: 25px;
+            }
+            QPushButton:hover {
+                background-color: #2ECC71;
+            }
+            QPushButton:pressed {
+                background-color: #229954;
+            }
+            QPushButton:checked {
+                background-color: #1ABC9C;
+                border: 1px solid #16A085;
+            }
+        """)
         button_layout.addWidget(self.rgb_button)
 
-        # 深度图像按钮 - 浅色
+        # 深度图像按钮 - 现代化设计
         self.depth_button = QPushButton("深度图像")
         self.depth_button.setCheckable(True)
         self.depth_button.clicked.connect(self.switchToDepthImage)
+        self.depth_button.setStyleSheet("""
+            QPushButton {
+                background-color: #34495E;
+                color: white;
+                border: none;
+                border-radius: 4px;
+                padding: 6px 12px;
+                font-weight: bold;
+                font-size: 10pt;
+                min-height: 25px;
+            }
+            QPushButton:hover {
+                background-color: #3498DB;
+            }
+            QPushButton:pressed {
+                background-color: #2980B9;
+            }
+            QPushButton:checked {
+                background-color: #1ABC9C;
+                border: 1px solid #16A085;
+            }
+        """)
         button_layout.addWidget(self.depth_button)
 
-        # 初始化按钮样式
-        button_width = self.adaptive_image_width // 2  # 按钮宽度为图像宽度的一半
-        self.updateButtonStyles(button_width)
-        
-        # 添加按钮容器到图像显示布局
-        image_display_layout.addWidget(button_container)
+        image_group_layout.addWidget(button_container)
 
-        # 创建图像显示区域
+        # 创建图像显示容器
+        image_frame = QFrame()
+        image_frame.setFrameShape(QFrame.StyledPanel)
+        image_frame.setStyleSheet("""
+            QFrame {
+                background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                    stop:0 rgba(44, 62, 80, 0.9),
+                    stop:1 rgba(26, 32, 44, 0.9));
+                border-radius: 6px;
+                border: 1px solid rgba(52, 152, 219, 0.3);
+            }
+        """)
+        image_frame_layout = QVBoxLayout(image_frame)
+        image_frame_layout.setContentsMargins(2, 2, 2, 2)  # 进一步减少内边距
+        image_frame_layout.setSpacing(0)
+
+        # 图像显示标签
         self.image_label = QLabel()
         self.image_label.setAlignment(Qt.AlignCenter)
-        self.image_label.setFixedSize(self.adaptive_image_width, self.adaptive_image_height)  # 使用自适应尺寸
-        self.image_label.setStyleSheet("background-color: #1A202C; border: 1px solid #3498DB; border-top: none;")
-        self.image_label.setText("等待图像...")
+        self.image_label.setFixedSize(self.adaptive_image_width - 16, self.adaptive_image_height - 10)  # 调整尺寸适应新布局
+        self.image_label.setStyleSheet("""
+            QLabel {
+                background-color: #1A202C;
+                border: 1px solid #3498DB;
+                border-radius: 4px;
+                color: #FFFFFF;
+                font-size: 10pt;
+            }
+        """)
+        self.image_label.setText("""
+            <div style='
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                height: 100%;
+                width: 100%;
+                font-size: 16pt;
+                color: #3498DB;
+                text-align: center;
+                font-weight: bold;
+            '>
+                等待图像...
+            </div>
+        """)
         self.image_label.setScaledContents(True)  # 启用内容缩放
-        image_display_layout.addWidget(self.image_label)
+        image_frame_layout.addWidget(self.image_label, 0, Qt.AlignCenter)
+
+        image_group_layout.addWidget(image_frame)
+
+        # 添加图像组到图像显示布局
+        image_display_layout.addWidget(image_group)
         
         # 添加图像显示容器，使用拉伸系数1
         right_sidebar_layout.addWidget(image_display_container, 1)
@@ -1102,27 +1603,24 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         self.ros_time_label.setStyleSheet("color: #3498DB; padding-right: 50px;")  # 增加右侧内边距，避免与右侧按钮重叠
         status_bar.addPermanentWidget(self.ros_time_label)
         
-        # 设置定时器以更新状态栏信息
-        self.status_timer = QTimer(self)
-        self.status_timer.timeout.connect(self.updateStatusBar)
-        self.status_timer.start(100)  # 每100ms更新一次
-        
+        # 注意：定时器已在_init_timers中统一初始化，这里不再重复创建
+
         # 记录帧率计算的变量
         self.frame_count = 0
         self.last_frame_time = time.time()
-        
+
         # 速度数据
         self.speed = 0
         self.linear_speed = 0
         self.angular_speed = 0
-        
+
         # 初始状态设置为未连接
         if hasattr(self, 'connection_label'):
             self.connection_label.setText("未连接")
+            # 不设置字体大小，保持卡片的原始字体设置
             self.connection_label.setStyleSheet("""
                 QLabel {
                     color: #E74C3C;
-                    font-size: 14pt;
                     font-weight: bold;
                     background: transparent;
                     border: none;
@@ -1133,11 +1631,6 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         if hasattr(self, 'mode_label'):
             self.mode_label.setText("未连接")
         
-        # 设置图像更新定时器
-        self.image_timer = QTimer(self)
-        self.image_timer.timeout.connect(self.updateImageDisplay)
-        self.image_timer.start(33)  # 约30fps
-        
         main_layout.addWidget(status_bar)
         
         # 设置布局的拉伸因子，让中间的RViz显示区域占据大部分空间
@@ -1147,17 +1640,13 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
 
         # QMainWindow已经在初始化时设置了central_widget，不需要再调用setLayout
         
-        # 程序启动时自动初始化话题订阅器，无需等待点击一键启动按钮
-        QTimer.singleShot(2000, self.setupTopicSubscriber)  # 延迟2秒初始化订阅器，确保界面已完全加载
-
-        # 延迟更新图像尺寸，确保右侧栏已经正确初始化
-        QTimer.singleShot(1000, self.updateImageSizes)
+        # 注意：延迟初始化已在_init_timers中处理，避免重复
         
         # 初始化话题订阅器变量，但不启动订阅（在__init__末尾会自动订阅）
         self.topic_subscriber = None
         
-        # 用于存储小球截图的字典 {ball_id: {"image": cv_image, "path": 文件路径}}
-        self.ball_screenshots = {}
+        # 用于存储小球截图的字典 {ball_id: {"path": 文件路径, "timestamp": 时间戳}}
+        # 注意：不再存储图像数据，只存储文件路径以避免内存问题
         
         # 确保截图存储目录存在
         self.screenshots_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "screenshots")
@@ -1247,97 +1736,63 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
             self.setupTableColumnWidths()
 
     def setupTableColumnWidths(self):
-        """设置表格列宽，避免横向滚动条"""
+        """设置表格列宽，前4列等宽，最后一列拉伸填充"""
         if not hasattr(self, 'position_table') or not hasattr(self, 'right_sidebar'):
             return
 
         # 获取右侧栏的实际宽度
         sidebar_width = self.right_sidebar.width() if self.right_sidebar.isVisible() else self.adaptive_right_width
 
-        # 计算表格可用宽度（减去边距和边框）
-        available_width = sidebar_width - 40  # 减去左右边距和边框
+        # 计算表格可用宽度（减去边距、边框和滚动条）
+        available_width = sidebar_width - 50  # 减去左右边距、边框和可能的滚动条
 
-        # 根据屏幕分辨率和可用宽度智能分配列宽
-        if available_width < 300:  # 非常小的宽度
-            # ID列: 30px, X坐标: 60px, Y坐标: 60px, 状态: 50px, 截图: 剩余
-            column_widths = [30, 60, 60, 50, max(40, available_width - 200)]
-        elif available_width < 400:  # 1K分辨率等较小宽度
-            # ID列: 35px, X坐标: 70px, Y坐标: 70px, 状态: 60px, 截图: 剩余
-            column_widths = [35, 70, 70, 60, max(50, available_width - 235)]
-        else:  # 较大宽度
-            # ID列: 40px, X坐标: 80px, Y坐标: 80px, 状态: 70px, 截图: 剩余
-            column_widths = [40, 80, 80, 70, max(60, available_width - 270)]
+        # 计算前4列的统一宽度
+        # 为最后一列预留合理宽度，剩余空间平均分配给前4列
+        min_last_column_width = 80   # 截图列最小宽度
+        max_last_column_width = 150  # 截图列最大宽度，避免过度拉伸
 
-        # 设置各列的宽度
+        # 计算理想的最后一列宽度
+        ideal_last_column_width = min(max_last_column_width, max(min_last_column_width, available_width * 0.25))
+
+        # 计算前4列可用的总宽度
+        width_for_first_4_columns = available_width - ideal_last_column_width
+
+        # 确保有足够空间
+        if width_for_first_4_columns < 200:  # 如果空间太小
+            # 紧凑模式：前4列使用更小的统一宽度
+            uniform_width = max(35, width_for_first_4_columns // 4)
+            # 重新计算最后一列宽度
+            actual_last_column_width = available_width - uniform_width * 4
+            min_last_column_width = max(60, actual_last_column_width)
+        else:
+            # 正常模式：前4列使用合适的统一宽度
+            uniform_width = max(50, min(75, width_for_first_4_columns // 4))
+            # 重新计算实际的最后一列宽度
+            actual_last_column_width = available_width - uniform_width * 4
+
+        # 设置列宽数组：前4列等宽，最后一列拉伸
+        column_widths = [uniform_width] * 4  # 前4列：ID, X坐标, Y坐标, 状态
+
+        # 设置各列的宽度和调整模式
         header = self.position_table.horizontalHeader()
-        for i, width in enumerate(column_widths):
-            if i < len(column_widths) - 1:  # 前面的列设置固定宽度
-                header.setSectionResizeMode(i, QHeaderView.Fixed)
-                self.position_table.setColumnWidth(i, width)
-            else:  # 最后一列（截图列）拉伸填充剩余空间
-                header.setSectionResizeMode(i, QHeaderView.Stretch)
 
-        print(f"表格列宽设置: 可用宽度={available_width}px, 列宽={column_widths}")
+        # 前4列设置为固定宽度且等宽
+        for i in range(4):
+            header.setSectionResizeMode(i, QHeaderView.Fixed)
+            self.position_table.setColumnWidth(i, uniform_width)
+
+        # 最后一列（截图列）设置为拉伸模式，自动填充剩余空间
+        header.setSectionResizeMode(4, QHeaderView.Stretch)
+
+        # 设置表格头的最小截面大小，避免过度压缩
+        header.setMinimumSectionSize(min_last_column_width)
+
+        print(f"表格列宽设置: 可用宽度={available_width}px, 前4列统一宽度={uniform_width}px, 最后列宽度={actual_last_column_width}px (范围:{min_last_column_width}-{max_last_column_width}px)")
 
     def updateButtonStyles(self, button_width):
-        """更新按钮样式以适应新宽度"""
-        if hasattr(self, 'rgb_button'):
-            self.rgb_button.setStyleSheet(f"""
-                QPushButton {{
-                    background-color: #2C3E50;  /* 深色 */
-                    color: white;
-                    border-radius: 0;  /* 无圆角 */
-                    border: none;
-                    font-weight: bold;
-                    font-size: 10pt;  /* 固定字体大小 */
-                    padding: 2px;
-                    min-width: {button_width}px;
-                    text-align: center;
-                }}
-                QPushButton:hover {{
-                    background-color: #234567;
-                }}
-                QPushButton:checked {{
-                    background-color: #1A202C;  /* 选中时更深的颜色 */
-                    color: white;
-                    border-radius: 0;  /* 无圆角 */
-                    border: none;
-                    font-weight: bold;
-                    font-size: 10pt;  /* 固定字体大小 */
-                    padding: 2px;
-                    min-width: {button_width}px;
-                    text-align: center;
-                }}
-            """)
-
-        if hasattr(self, 'depth_button'):
-            self.depth_button.setStyleSheet(f"""
-                QPushButton {{
-                    background-color: #3498DB;  /* 浅色 */
-                    color: white;
-                    border-radius: 0;  /* 无圆角 */
-                    border: none;
-                    font-weight: bold;
-                    font-size: 10pt;  /* 固定字体大小 */
-                    padding: 2px;
-                    min-width: {button_width}px;
-                    text-align: center;
-                }}
-                QPushButton:hover {{
-                    background-color: #2980B9;
-                }}
-                QPushButton:checked {{
-                    background-color: #1A202C;  /* 选中时更深的颜色 */
-                    color: white;
-                    border-radius: 0;  /* 无圆角 */
-                    border: none;
-                    font-weight: bold;
-                    font-size: 10pt;  /* 固定字体大小 */
-                    padding: 2px;
-                    min-width: {button_width}px;
-                    text-align: center;
-                }}
-            """)
+        """更新按钮样式以适应新宽度 - 现在使用内联样式，此函数保留以兼容性"""
+        # 按钮样式现在在创建时直接设置，无需动态更新
+        pass
 
     def setupAdaptiveSplitterSizes(self):
         """设置自适应的分割器尺寸"""
@@ -1404,7 +1859,7 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         row1_container = QWidget()
         row1_layout = QHBoxLayout(row1_container)
         row1_layout.setContentsMargins(0, 0, 0, 0)
-        row1_layout.setSpacing(12)
+        row1_layout.setSpacing(3)  # 进一步减少卡片间距
 
         # 飞行模式卡片 - 使用compact模式
         mode_card = self.createStatusCard("飞行模式", "MANUAL", "#3498DB", compact=True)
@@ -1422,7 +1877,7 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         row2_container = QWidget()
         row2_layout = QHBoxLayout(row2_container)
         row2_layout.setContentsMargins(0, 0, 0, 0)
-        row2_layout.setSpacing(12)
+        row2_layout.setSpacing(3)  # 进一步减少卡片间距
 
         # 飞行高度卡片 - 使用compact模式
         altitude_card = self.createStatusCard("飞行高度", "0.0000 m", "#E67E22", compact=True)
@@ -1440,7 +1895,7 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         row3_container = QWidget()
         row3_layout = QHBoxLayout(row3_container)
         row3_layout.setContentsMargins(0, 0, 0, 0)
-        row3_layout.setSpacing(10)
+        row3_layout.setSpacing(3)  # 进一步减少卡片间距
 
         # 俯仰角卡片
         pitch_card = self.createStatusCard("俯仰角", "0.00°", "#1ABC9C", compact=True)
@@ -1478,6 +1933,30 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
                         stop:1 rgba(0, 0, 0, 0.12));
                     border: 1px solid {color};
                     border-radius: 6px;
+                    margin: 0px;
+                }}
+                QFrame:hover {{
+                    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                        stop:0 rgba(255, 255, 255, 0.12),
+                        stop:1 rgba(0, 0, 0, 0.08));
+                    border: 2px solid {color};
+                }}
+            """)
+            # 根据屏幕分辨率调整高度，增加高度以更好填充空间
+            if hasattr(self, 'screen_height') and self.screen_height <= 768:  # 1K分辨率或更小
+                card.setMinimumHeight(60)
+                card.setMaximumHeight(60)
+            else:
+                card.setMinimumHeight(70)
+                card.setMaximumHeight(70)
+        else:
+            card.setStyleSheet(f"""
+                QFrame {{
+                    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
+                        stop:0 rgba(255, 255, 255, 0.08),
+                        stop:1 rgba(0, 0, 0, 0.12));
+                    border: 1px solid {color};
+                    border-radius: 10px;
                     margin: 1px;
                 }}
                 QFrame:hover {{
@@ -1487,36 +1966,12 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
                     border: 2px solid {color};
                 }}
             """)
-            # 根据屏幕分辨率调整高度
-            if hasattr(self, 'screen_height') and self.screen_height <= 768:  # 1K分辨率或更小
-                card.setMinimumHeight(55)
-                card.setMaximumHeight(55)
-            else:
-                card.setMinimumHeight(65)
-                card.setMaximumHeight(65)
-        else:
-            card.setStyleSheet(f"""
-                QFrame {{
-                    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                        stop:0 rgba(255, 255, 255, 0.08),
-                        stop:1 rgba(0, 0, 0, 0.12));
-                    border: 1px solid {color};
-                    border-radius: 10px;
-                    margin: 3px;
-                }}
-                QFrame:hover {{
-                    background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                        stop:0 rgba(255, 255, 255, 0.12),
-                        stop:1 rgba(0, 0, 0, 0.08));
-                    border: 2px solid {color};
-                }}
-            """)
             if full_width:
-                card.setMinimumHeight(75)
-                card.setMaximumHeight(75)
+                card.setMinimumHeight(80)  # 增加全宽卡片高度
+                card.setMaximumHeight(80)
             else:
-                card.setMinimumHeight(85)
-                card.setMaximumHeight(85)
+                card.setMinimumHeight(90)  # 增加普通卡片高度
+                card.setMaximumHeight(90)
 
         layout = QVBoxLayout(card)
         layout.setContentsMargins(0, 0, 0, 0)  # 去掉内边距
@@ -1637,10 +2092,20 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         # 如果已经在动画中，则不重复触发
         if hasattr(self, 'sidebar_animation') and self.sidebar_animation.state() == QPropertyAnimation.Running:
             return
-            
+
+        # 清理之前的动画对象
+        if hasattr(self, 'sidebar_animation'):
+            try:
+                self.sidebar_animation.finished.disconnect()
+                self.sidebar_animation.valueChanged.disconnect()
+                self.sidebar_animation.stop()
+                self.sidebar_animation.deleteLater()
+            except:
+                pass  # 忽略断开连接时的错误
+
         # 打印调试信息
         # print(f"切换侧边栏: hide={should_hide}, animate={animate}, 当前状态={self.sidebar_expanded}")
-        
+
         if should_hide:
             # 隐藏侧边栏
             if animate:
@@ -1651,13 +2116,16 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
                 self.sidebar_animation.setStartValue(current_width)
                 self.sidebar_animation.setEndValue(0)
                 self.sidebar_animation.setEasingCurve(QEasingCurve.InOutQuad)
-                
+
                 # 确保侧边栏可见性正确
                 self.left_sidebar.setVisible(True)
-                
+
                 # 动画结束后更新状态
                 self.sidebar_animation.finished.connect(lambda: self.finishSidebarAnimation(False))
-                
+
+                # 动画过程中定期更新悬浮窗口位置
+                self.sidebar_animation.valueChanged.connect(lambda: self._update_overlay_positions())
+
                 # 启动动画
                 self.sidebar_animation.start()
                 
@@ -1677,9 +2145,22 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
                 # 更新分割器尺寸
                 sizes = self.main_splitter.sizes()
                 self.main_splitter.setSizes([0, 20, sizes[0] + sizes[2]])
+
+                # 立即更新悬浮窗口位置
+                QTimer.singleShot(50, self._update_overlay_positions)
         else:
             # 显示侧边栏
             if animate:
+                # 清理之前的动画对象（如果存在）
+                if hasattr(self, 'sidebar_animation'):
+                    try:
+                        self.sidebar_animation.finished.disconnect()
+                        self.sidebar_animation.valueChanged.disconnect()
+                        self.sidebar_animation.stop()
+                        self.sidebar_animation.deleteLater()
+                    except:
+                        pass  # 忽略断开连接时的错误
+
                 # 先设置最大宽度，以便动画可以工作
                 self.left_sidebar.setMaximumWidth(self.adaptive_left_width)
                 self.left_sidebar.setMinimumWidth(0)
@@ -1694,6 +2175,9 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
 
                 # 动画结束后更新状态
                 self.sidebar_animation.finished.connect(lambda: self.finishSidebarAnimation(True))
+
+                # 动画过程中定期更新悬浮窗口位置
+                self.sidebar_animation.valueChanged.connect(lambda: self._update_overlay_positions())
 
                 # 启动动画
                 self.sidebar_animation.start()
@@ -1713,6 +2197,9 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
                 # 更新分割器尺寸
                 sizes = self.main_splitter.sizes()
                 self.main_splitter.setSizes([self.adaptive_left_width, 20, sizes[2] - self.adaptive_left_width])
+
+                # 立即更新悬浮窗口位置
+                QTimer.singleShot(50, self._update_overlay_positions)
     
     def finishSidebarAnimation(self, expanded):
         """动画结束后的处理
@@ -1726,10 +2213,16 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         else:
             # 如果是显示状态，确保最小宽度也设置好
             self.left_sidebar.setMinimumWidth(self.adaptive_left_width)
+
+        # 动画完成后立即更新悬浮窗口位置，使用多次延迟更新确保位置正确
+        self._update_overlay_positions()
+        QTimer.singleShot(50, self._update_overlay_positions)
+        QTimer.singleShot(100, self._update_overlay_positions)
+        QTimer.singleShot(200, self._update_overlay_positions)
     
     def updateSidebarState(self, expanded):
         """更新侧边栏状态
-        
+
         参数:
             expanded: 是否展开
         """
@@ -1793,7 +2286,24 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
                     
                 # 更新电池图标
                 self.battery_icon_label.setPixmap(QPixmap(icon_path).scaled(24, 24, Qt.KeepAspectRatio, Qt.SmoothTransformation))
-            
+
+            # 同时更新RViz悬浮窗口的电池和电压显示
+            if hasattr(self, 'battery_value') and self.battery_value:
+                try:
+                    battery_formatted = f"{percentage:.1f}"
+                    unit = self.battery_value.property("unit") or ""
+                    self.battery_value.setText(f"{battery_formatted} {unit}".strip())
+                except Exception as e:
+                    pass  # 静默处理错误
+
+            if hasattr(self, 'voltage_value') and self.voltage_value:
+                try:
+                    voltage_formatted = f"{voltage:.2f}"
+                    unit = self.voltage_value.property("unit") or ""
+                    self.voltage_value.setText(f"{voltage_formatted} {unit}".strip())
+                except Exception as e:
+                    pass  # 静默处理错误
+
             # 标记电池话题有数据
             self.topics_with_data["battery"] = True
             
@@ -1818,7 +2328,16 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
             # 更新高度显示
             if hasattr(self, 'altitude_label'):
                 self.altitude_label.setText(f"{pos_z:.4f} m")
-            
+
+            # 同时更新RViz悬浮窗口的高度显示
+            if hasattr(self, 'altitude_value') and self.altitude_value:
+                try:
+                    height_formatted = f"{pos_z:.2f}"
+                    unit = self.altitude_value.property("unit") or ""
+                    self.altitude_value.setText(f"{height_formatted} {unit}".strip())
+                except Exception as e:
+                    pass  # 静默处理错误
+
             # 标记位置话题有数据
             self.topics_with_data["odometry"] = True
             
@@ -1863,7 +2382,16 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
             # 更新地面速度标签
             if hasattr(self, 'ground_speed_label'):
                 self.ground_speed_label.setText(f"{self.linear_speed:.4f} m/s")
-                
+
+            # 同时更新RViz悬浮窗口的速度显示
+            if hasattr(self, 'speed_value') and self.speed_value:
+                try:
+                    speed_formatted = f"{self.linear_speed:.2f}"
+                    unit = self.speed_value.property("unit") or ""
+                    self.speed_value.setText(f"{speed_formatted} {unit}".strip())
+                except Exception as e:
+                    pass  # 静默处理错误
+
             # 标记速度话题有数据
             self.topics_with_data["velocity"] = True
         except Exception as e:
@@ -1885,10 +2413,10 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
             if hasattr(self, 'connection_label'):
                 if connected:
                     self.connection_label.setText("已连接")
+                    # 不设置字体大小，保持卡片的原始字体设置
                     self.connection_label.setStyleSheet("""
                         QLabel {
                             color: #2ECC71;
-                            font-size: 14pt;
                             font-weight: bold;
                             background: transparent;
                             border: none;
@@ -1898,10 +2426,10 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
                     """)
                 else:
                     self.connection_label.setText("未连接")
+                    # 不设置字体大小，保持卡片的原始字体设置
                     self.connection_label.setStyleSheet("""
                         QLabel {
                             color: #E74C3C;
-                            font-size: 14pt;
                             font-weight: bold;
                             background: transparent;
                             border: none;
@@ -1913,111 +2441,242 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
             # 更新模式显示
             if hasattr(self, 'mode_label'):
                 self.mode_label.setText(mode if mode else "UNKNOWN")
-            
+
+            # 同时更新RViz悬浮窗口的模式显示
+            if hasattr(self, 'mode_value') and self.mode_value:
+                try:
+                    mode_text = mode if mode else "--"
+                    self.mode_value.setText(mode_text)
+                except Exception as e:
+                    pass  # 静默处理错误
+
             # 标记话题有数据
             self.topics_with_data["status"] = True
             
         except Exception as e:
             print(f"更新状态显示时出错: {str(e)}")
-    
+
+    def updateRCDisplay(self, rc_data):
+        """更新遥控器状态显示"""
+        try:
+            if not rc_data:
+                # 没有数据时显示未连接
+                if hasattr(self, 'rc_value') and self.rc_value:
+                    self.rc_value.setText("未连接")
+                    self.rc_value.setStyleSheet("color: #E74C3C; font-weight: bold;")
+                return
+
+            # 检查是否有通道数据
+            channels = rc_data.get('channels', [])
+            if channels and len(channels) > 0:
+                # 有通道数据，显示已连接
+                if hasattr(self, 'rc_value') and self.rc_value:
+                    self.rc_value.setText("已连接")
+                    self.rc_value.setStyleSheet("color: #2ECC71; font-weight: bold;")
+            else:
+                # 没有通道数据，显示未连接
+                if hasattr(self, 'rc_value') and self.rc_value:
+                    self.rc_value.setText("未连接")
+                    self.rc_value.setStyleSheet("color: #E74C3C; font-weight: bold;")
+
+            # 标记遥控器话题有数据
+            self.topics_with_data["rc_input"] = True
+
+        except Exception as e:
+            pass  # 静默处理错误
+
     def updateCameraImage(self, camera_data):
-        """处理摄像头图像更新"""
+        """处理摄像头图像更新 - 安全版本"""
         try:
             if not camera_data or camera_data["image"] is None:
                 return
-                
-            # 保存最新图像
-            self.camera_image = camera_data["image"]
-            
+
+            # 验证图像数据的有效性
+            image = camera_data["image"]
+            if not isinstance(image, np.ndarray):
+                print("图像数据不是numpy数组")
+                return
+
+            if image.size == 0:
+                print("图像数据为空")
+                return
+
+            # 检查图像维度
+            if len(image.shape) not in [2, 3]:
+                print(f"不支持的图像维度: {image.shape}")
+                return
+
+            # 保存最新图像（创建副本以确保数据安全）
+            self.camera_image = image.copy()
+
+            # 如果当前是RGB图像模式，使用信号安全地更新显示
+            if self.current_image_mode == "rgb" and hasattr(self, 'image_label'):
+                if pyqtSignal is not None and hasattr(self, 'image_update_signal'):
+                    self.image_update_signal.emit()
+                else:
+                    # 如果信号不可用，直接调用（可能不安全，但保持兼容性）
+                    self.updateImageDisplay()
+
         except Exception as e:
             print(f"处理图像更新时出错: {str(e)}")
+            import traceback
+            traceback.print_exc()
 
     def updateImageDisplay(self):
-        """更新图像显示"""
+        """更新图像显示 - 优化版本，减少重复代码"""
         try:
+            if not hasattr(self, 'image_label') or not self.image_label:
+                return
+
+            image_data = None
+
             if self.current_image_mode == "rgb" and self.camera_image is not None:
-                # 显示RGB图像
-                height, width, channel = self.camera_image.shape
-                bytes_per_line = 3 * width
-                
-                # 将BGR转换为RGB格式
-                rgb_image = cv2.cvtColor(self.camera_image, cv2.COLOR_BGR2RGB)
-                
-                # 创建QImage
-                q_image = QImage(rgb_image.data, width, height, bytes_per_line, QImage.Format_RGB888)
-                
-                # 创建QPixmap并设置到标签
-                pixmap = QPixmap.fromImage(q_image)
-                
-                # 设置图像到标签，保持宽高比
-                self.image_label.setPixmap(pixmap.scaled(
-                    640, 
-                    480,
-                    Qt.KeepAspectRatio, 
-                    Qt.SmoothTransformation
-                ))
+                image_data = self.camera_image
             elif self.current_image_mode == "depth" and self.depth_image is not None:
-                # 显示深度图像
-                # 规范化深度图像以便可视化
-                cv_img = self.depth_image.copy()
-                
-                # 检查图像类型和通道
-                if len(cv_img.shape) == 2:  # 单通道深度图
-                    # 归一化到0-255，用于可视化
-                    min_val, max_val, _, _ = cv2.minMaxLoc(cv_img)
-                    if max_val > min_val:
-                        cv_img = cv2.convertScaleAbs(cv_img, alpha=255.0/(max_val-min_val), beta=-min_val*255.0/(max_val-min_val))
-                    
-                    # 应用彩色映射以便更好地可视化
-                    cv_img = cv2.applyColorMap(cv_img, cv2.COLORMAP_JET)
-                    
-                    # 将BGR转换为RGB格式
-                    cv_img = cv2.cvtColor(cv_img, cv2.COLOR_BGR2RGB)
-                    
-                    height, width, channel = cv_img.shape
-                    bytes_per_line = 3 * width
-                    
-                    # 创建QImage
-                    q_image = QImage(cv_img.data, width, height, bytes_per_line, QImage.Format_RGB888)
-                else:  # 已经是3通道图像
-                    height, width, channel = cv_img.shape
-                    bytes_per_line = 3 * width
-                    
-                    # 将BGR转换为RGB格式
-                    cv_img = cv2.cvtColor(cv_img, cv2.COLOR_BGR2RGB)
-                    
-                    # 创建QImage
-                    q_image = QImage(cv_img.data, width, height, bytes_per_line, QImage.Format_RGB888)
-                
-                # 创建QPixmap并设置到标签
-                pixmap = QPixmap.fromImage(q_image)
-                
-                # 设置图像到标签，保持宽高比
-                self.image_label.setPixmap(pixmap.scaled(
-                    640, 
-                    480,
-                    Qt.KeepAspectRatio, 
-                    Qt.SmoothTransformation
-                ))
+                image_data = self._process_depth_image(self.depth_image)
+
+            if image_data is not None:
+                pixmap = self._convert_cv_to_pixmap(image_data)
+                if pixmap:
+                    self._scale_and_set_pixmap('image_label', pixmap)
+                else:
+                    print("警告: 图像转换为QPixmap失败")
+                    self._show_image_placeholder()
             else:
-                # 无图像时显示默认文本，使用加大字号的样式使提示更明显
-                if hasattr(self, 'image_label') and self.image_label:
-                    if not self.topic_subscriber:
-                        # 未启动订阅器时显示提示信息
-                        self.image_label.setText("<div style='font-size: 16pt; color: #3498DB; text-align: center; margin-top: 200px;'>正在自动连接话题，请稍候...</div>")
-                    elif self.current_image_mode == "rgb":
-                        if not self.topic_subscriber.is_topic_active("camera"):
-                            self.image_label.setText("<div style='font-size: 16pt; color: #3498DB; text-align: center; margin-top: 200px;'>等待RGB图像话题连接...</div>")
-                        else:
-                            self.image_label.setText("<div style='font-size: 16pt; color: #3498DB; text-align: center; margin-top: 200px;'>等待RGB图像数据...</div>")
-                    else:  # depth模式
-                        if not self.topic_subscriber.is_topic_active("depth"):
-                            self.image_label.setText("<div style='font-size: 16pt; color: #3498DB; text-align: center; margin-top: 200px;'>等待深度图像话题连接...</div>")
-                        else:
-                            self.image_label.setText("<div style='font-size: 16pt; color: #3498DB; text-align: center; margin-top: 200px;'>等待深度图像数据...</div>")
+                self._show_image_placeholder()
+
         except Exception as e:
             print(f"更新图像显示时出错: {str(e)}")
-            self.image_label.setText(f"图像显示错误: {str(e)}")
+            import traceback
+            traceback.print_exc()
+            if hasattr(self, 'image_label'):
+                try:
+                    self.image_label.setText(f"图像显示错误: {str(e)}")
+                except Exception as e2:
+                    print(f"设置错误文本时也出错: {str(e2)}")
+
+    def _process_depth_image(self, depth_image):
+        """处理深度图像"""
+        cv_img = depth_image.copy()
+
+        if len(cv_img.shape) == 2:  # 单通道深度图
+            # 归一化到0-255，用于可视化
+            min_val, max_val, _, _ = cv2.minMaxLoc(cv_img)
+            if max_val > min_val:
+                cv_img = cv2.convertScaleAbs(cv_img, alpha=255.0/(max_val-min_val), beta=-min_val*255.0/(max_val-min_val))
+            # 应用彩色映射
+            cv_img = cv2.applyColorMap(cv_img, cv2.COLORMAP_JET)
+
+        return cv_img
+
+    def _convert_cv_to_pixmap(self, cv_image):
+        """将OpenCV图像转换为QPixmap - 安全版本"""
+        try:
+            if cv_image is None:
+                print("输入图像为None")
+                return None
+
+            # 检查图像是否有效
+            if cv_image.size == 0:
+                print("图像数据为空")
+                return None
+
+            # 检查图像数据类型
+            if not isinstance(cv_image, np.ndarray):
+                print(f"图像数据类型错误: {type(cv_image)}")
+                return None
+
+            # 确保图像数据是连续的
+            if not cv_image.flags['C_CONTIGUOUS']:
+                cv_image = np.ascontiguousarray(cv_image)
+
+            # 确保是3通道BGR图像
+            if len(cv_image.shape) == 3:
+                height, width, channel = cv_image.shape
+                if channel != 3:
+                    print(f"不支持的通道数: {channel}")
+                    return None
+                # 将BGR转换为RGB格式
+                try:
+                    rgb_image = cv2.cvtColor(cv_image, cv2.COLOR_BGR2RGB)
+                except Exception as e:
+                    print(f"BGR到RGB转换失败: {e}")
+                    return None
+            elif len(cv_image.shape) == 2:
+                # 单通道图像转换为RGB
+                try:
+                    rgb_image = cv2.cvtColor(cv_image, cv2.COLOR_GRAY2RGB)
+                    height, width, channel = rgb_image.shape
+                except Exception as e:
+                    print(f"灰度到RGB转换失败: {e}")
+                    return None
+            else:
+                print(f"不支持的图像维度: {cv_image.shape}")
+                return None
+
+            # 确保转换后的图像数据是连续的
+            if not rgb_image.flags['C_CONTIGUOUS']:
+                rgb_image = np.ascontiguousarray(rgb_image)
+
+            bytes_per_line = 3 * width
+
+            # 创建QImage时使用copy确保数据安全
+            try:
+                q_image = QImage(rgb_image.data, width, height, bytes_per_line, QImage.Format_RGB888)
+
+                if q_image.isNull():
+                    print("创建QImage失败")
+                    return None
+
+                # 创建QPixmap的副本以确保数据生命周期
+                pixmap = QPixmap.fromImage(q_image.copy())
+
+                if pixmap.isNull():
+                    print("创建QPixmap失败")
+                    return None
+
+                return pixmap
+            except Exception as e:
+                print(f"创建QImage/QPixmap时出错: {e}")
+                return None
+
+        except Exception as e:
+            print(f"图像转换错误: {e}")
+            import traceback
+            traceback.print_exc()
+            return None
+
+    def _show_image_placeholder(self):
+        """显示图像占位符"""
+        if not self.topic_subscriber:
+            text = "正在自动连接话题，请稍候..."
+        elif self.current_image_mode == "rgb":
+            if not self.topic_subscriber.is_topic_active("camera"):
+                text = "等待RGB图像话题连接..."
+            else:
+                text = "等待RGB图像数据..."
+        else:  # depth模式
+            if not self.topic_subscriber.is_topic_active("depth"):
+                text = "等待深度图像话题连接..."
+            else:
+                text = "等待深度图像数据..."
+
+        # 使用更好的居中样式，确保文字在标签中完全居中
+        self.image_label.setText(f"""
+            <div style='
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                height: 100%;
+                width: 100%;
+                font-size: 16pt;
+                color: #3498DB;
+                text-align: center;
+                font-weight: bold;
+            '>
+                {text}
+            </div>
+        """)
     
     def updateStatusBar(self):
         # 更新帧率
@@ -2066,11 +2725,7 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
                 
             if hasattr(self, 'ground_speed_label'):
                 self.ground_speed_label.setText("-- m/s")
-                
-            if hasattr(self, 'dashboard') and self.dashboard:
-                self.dashboard.set_speed(0)
-                self.dashboard.set_gear(11)  # N挡
-                
+
             # 当没有话题订阅器时，不使用模拟数据
             return
         
@@ -2104,10 +2759,10 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
                 if not self.topic_subscriber or not self.topic_subscriber.is_topic_active("status"):
                     # 未连接状态
                     self.connection_label.setText("未连接")
+                    # 不设置字体大小，保持卡片的原始字体设置
                     self.connection_label.setStyleSheet("""
                         QLabel {
                             color: #E74C3C;
-                            font-size: 14pt;
                             font-weight: bold;
                             background: transparent;
                             border: none;
@@ -2128,15 +2783,43 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
             if hasattr(self, 'image_label'):
                 if not self.topic_subscriber.is_topic_active("camera"):
                     if self.current_image_mode == "rgb":  # 只在RGB模式下更新
-                        self.image_label.setText("<div style='font-size: 16pt; color: #3498DB; text-align: center; margin-top: 200px;'>等待RGB图像话题连接...</div>")
+                        self.image_label.setText("""
+                            <div style='
+                                display: flex;
+                                align-items: center;
+                                justify-content: center;
+                                height: 100%;
+                                width: 100%;
+                                font-size: 16pt;
+                                color: #3498DB;
+                                text-align: center;
+                                font-weight: bold;
+                            '>
+                                等待RGB图像话题连接...
+                            </div>
+                        """)
                     # 确保未使用模拟图像
                     self.camera_image = None
-                
+
             # 更新深度图像显示文本 - 使用自定义HTML样式显示
             if hasattr(self, 'image_label'):
                 if not self.topic_subscriber.is_topic_active("depth"):
                     if self.current_image_mode == "depth":  # 只在深度模式下更新
-                        self.image_label.setText("<div style='font-size: 16pt; color: #3498DB; text-align: center; margin-top: 200px;'>等待深度图像话题连接...</div>")
+                        self.image_label.setText("""
+                            <div style='
+                                display: flex;
+                                align-items: center;
+                                justify-content: center;
+                                height: 100%;
+                                width: 100%;
+                                font-size: 16pt;
+                                color: #3498DB;
+                                text-align: center;
+                                font-weight: bold;
+                            '>
+                                等待深度图像话题连接...
+                            </div>
+                        """)
                     # 确保未使用模拟图像
                     self.depth_image = None
                 
@@ -2290,7 +2973,17 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         # 如果已经在动画中，则不重复触发
         if hasattr(self, 'right_sidebar_animation') and self.right_sidebar_animation.state() == QPropertyAnimation.Running:
             return
-        
+
+        # 清理之前的动画对象
+        if hasattr(self, 'right_sidebar_animation'):
+            try:
+                self.right_sidebar_animation.finished.disconnect()
+                self.right_sidebar_animation.valueChanged.disconnect()
+                self.right_sidebar_animation.stop()
+                self.right_sidebar_animation.deleteLater()
+            except:
+                pass  # 忽略断开连接时的错误
+
         if should_hide:
             # 隐藏右侧栏
             if animate:
@@ -2301,13 +2994,16 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
                 self.right_sidebar_animation.setStartValue(current_width)
                 self.right_sidebar_animation.setEndValue(0)
                 self.right_sidebar_animation.setEasingCurve(QEasingCurve.InOutQuad)
-                
+
                 # 确保右侧栏可见性正确
                 self.right_sidebar.setVisible(True)
-                
+
                 # 动画结束后更新状态
                 self.right_sidebar_animation.finished.connect(lambda: self.finishRightSidebarAnimation(False))
-                
+
+                # 动画过程中定期更新悬浮窗口位置
+                self.right_sidebar_animation.valueChanged.connect(lambda: self._update_overlay_positions())
+
                 # 启动动画
                 self.right_sidebar_animation.start()
                 
@@ -2329,9 +3025,22 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
                 sizes = self.main_splitter.sizes()
                 new_sizes = [sizes[0], sizes[1], sizes[2] + sizes[4], sizes[3], 0]
                 self.main_splitter.setSizes(new_sizes)
+
+                # 立即更新悬浮窗口位置
+                QTimer.singleShot(50, self._update_overlay_positions)
         else:
             # 显示右侧栏
             if animate:
+                # 清理之前的动画对象（如果存在）
+                if hasattr(self, 'right_sidebar_animation'):
+                    try:
+                        self.right_sidebar_animation.finished.disconnect()
+                        self.right_sidebar_animation.valueChanged.disconnect()
+                        self.right_sidebar_animation.stop()
+                        self.right_sidebar_animation.deleteLater()
+                    except:
+                        pass  # 忽略断开连接时的错误
+
                 # 先设置最大宽度，以便动画可以工作
                 self.right_sidebar.setMaximumWidth(self.adaptive_right_width)
                 self.right_sidebar.setMinimumWidth(0)
@@ -2346,6 +3055,9 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
 
                 # 动画结束后更新状态
                 self.right_sidebar_animation.finished.connect(lambda: self.finishRightSidebarAnimation(True))
+
+                # 动画过程中定期更新悬浮窗口位置
+                self.right_sidebar_animation.valueChanged.connect(lambda: self._update_overlay_positions())
 
                 # 启动动画
                 self.right_sidebar_animation.start()
@@ -2378,6 +3090,9 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
                     new_sizes = [sizes[0], sizes[1], new_middle, sizes[3], total_space - new_middle]
                 self.main_splitter.setSizes(new_sizes)
 
+                # 立即更新悬浮窗口位置
+                QTimer.singleShot(50, self._update_overlay_positions)
+
         # 延迟更新图像尺寸以适应侧边栏变化
         QTimer.singleShot(250, self.updateImageSizes)
         # 延迟更新表格列宽
@@ -2395,10 +3110,16 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         else:
             # 如果是显示状态，确保最小宽度也设置好
             self.right_sidebar.setMinimumWidth(self.adaptive_right_width)
+
+        # 动画完成后立即更新悬浮窗口位置，使用多次延迟更新确保位置正确
+        self._update_overlay_positions()
+        QTimer.singleShot(50, self._update_overlay_positions)
+        QTimer.singleShot(100, self._update_overlay_positions)
+        QTimer.singleShot(200, self._update_overlay_positions)
     
     def updateRightSidebarState(self, expanded):
         """更新右侧栏状态
-        
+
         参数:
             expanded: 是否展开
         """
@@ -2463,7 +3184,14 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
                         self.roll_label.setText(f"{roll_value:.2f}°")
                     if hasattr(self, 'yaw_label'):
                         self.yaw_label.setText(f"{-yaw_value:.2f}°")
-                    
+
+                    # 同时更新RViz悬浮窗口组件
+                    if hasattr(self, 'compass') and self.compass:
+                        self.compass.set_heading(-yaw_value)
+
+                    if hasattr(self, 'attitude_widget') and self.attitude_widget:
+                        self.attitude_widget.update_attitude(pitch_value, roll_value)
+
                     # 保留对姿态指示器的更新，如果还在使用的话
                     if hasattr(self, 'attitude_indicator'):
                         self.attitude_indicator.update_attitude(self.pitch, self.roll)
@@ -2830,7 +3558,21 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
             if hasattr(self, 'camera_image'):
                 self.camera_image = None
                 if hasattr(self, 'image_label'):
-                    self.image_label.setText("等待图像数据...")
+                    self.image_label.setText("""
+                        <div style='
+                            display: flex;
+                            align-items: center;
+                            justify-content: center;
+                            height: 100%;
+                            width: 100%;
+                            font-size: 16pt;
+                            color: #3498DB;
+                            text-align: center;
+                            font-weight: bold;
+                        '>
+                            等待图像数据...
+                        </div>
+                    """)
                 
             # 创建新的订阅器
             self.topic_subscriber = TopicsSubscriber()
@@ -2840,6 +3582,7 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
             self.topic_subscriber.register_callback("odometry", self.updatePositionDisplay)
             self.topic_subscriber.register_callback("velocity", self.updateVelocityDisplay)
             self.topic_subscriber.register_callback("status", self.updateStatusDisplay)
+            self.topic_subscriber.register_callback("rc_input", self.updateRCDisplay)
             self.topic_subscriber.register_callback("camera", self.updateCameraImage)
             self.topic_subscriber.register_callback("depth", self.updateDepthImage)
             self.topic_subscriber.register_callback("bird_view", self.updateBirdViewImage)
@@ -3188,20 +3931,14 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         self.rgb_button.setChecked(True)
         self.depth_button.setChecked(False)
         self.current_image_mode = "rgb"
-        # 直接调整背景色而不重设整个样式
-        self.rgb_button.setStyleSheet("background-color: #1A202C; font-size: 10pt;")
-        self.depth_button.setStyleSheet("background-color: #3498DB; font-size: 10pt;")
         # 更新显示
         self.updateImageDisplay()
-    
+
     def switchToDepthImage(self):
         """切换到深度图像模式"""
         self.rgb_button.setChecked(False)
         self.depth_button.setChecked(True)
         self.current_image_mode = "depth"
-        # 直接调整背景色而不重设整个样式
-        self.depth_button.setStyleSheet("background-color: #1A202C; font-size: 10pt;")
-        self.rgb_button.setStyleSheet("background-color: #3498DB; font-size: 10pt;")
         # 更新显示
         self.updateImageDisplay()
     
@@ -3213,10 +3950,14 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
                 
             # 保存最新深度图像
             self.depth_image = depth_data["image"]
-            
-            # 如果当前是深度图像模式，立即更新显示
+
+            # 如果当前是深度图像模式，使用信号安全地更新显示
             if self.current_image_mode == "depth" and hasattr(self, 'image_label'):
-                self.updateImageDisplay()
+                if pyqtSignal is not None and hasattr(self, 'image_update_signal'):
+                    self.image_update_signal.emit()
+                else:
+                    # 如果信号不可用，直接调用（可能不安全，但保持兼容性）
+                    self.updateImageDisplay()
                 
         except Exception as e:
             print(f"处理深度图像更新时出错: {str(e)}")
@@ -3229,9 +3970,13 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
                 
             # 保存最新鸟瞰图像
             self.bird_view_image = bird_view_data["image"]
-                
-            # 输出图像信息
-            self.updateBirdViewDisplay()
+
+            # 使用信号安全地更新鸟瞰图显示
+            if pyqtSignal is not None and hasattr(self, 'bird_view_update_signal'):
+                self.bird_view_update_signal.emit()
+            else:
+                # 如果信号不可用，直接调用（可能不安全，但保持兼容性）
+                self.updateBirdViewDisplay()
                 
         except Exception as e:
             import traceback
@@ -3239,86 +3984,30 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
             print(traceback.format_exc())
     
     def updateBirdViewDisplay(self):
-        """更新鸟瞰图显示"""
+        """更新鸟瞰图显示 - 优化版本"""
         try:
-            if self.bird_view_image is not None:
-                # 检查图像是否为空
-                if self.bird_view_image.size == 0 or self.bird_view_image is None:
-                    self.bird_view_label.setText("<div style='font-size: 14pt; color: #3498DB; text-align: center; margin-top: 100px;'>收到空图像数据</div>")
-                    return
-                    
-                # 将OpenCV图像转换为Qt图像
-                height, width = self.bird_view_image.shape[:2]
-                
-                # 检查图像类型和通道
-                if len(self.bird_view_image.shape) == 3:                   
-                    # 彩色图像 - BGR格式
-                    bytes_per_line = 3 * width   
-                    try:
-                        # 将BGR转换为RGB格式
-                        rgb_image = cv2.cvtColor(self.bird_view_image, cv2.COLOR_BGR2RGB)
-                        
-                        # 创建QImage
-                        q_image = QImage(rgb_image.data, width, height, bytes_per_line, QImage.Format_RGB888)
-                    except Exception as e:
-                        print(f"彩色图像转换失败: {str(e)}")
-                        # 如果转换失败，显示错误信息而不是尝试使用原始数据
-                        self.bird_view_label.setText(f"<div style='font-size: 12pt; color: #E74C3C; text-align: center; margin-top: 100px;'>图像处理错误:<br>{str(e)}</div>")
-                        return
+            if not hasattr(self, 'bird_view_label') or not self.bird_view_label:
+                return
+
+            if self.bird_view_image is not None and self.bird_view_image.size > 0:
+                pixmap = self._convert_cv_to_pixmap(self.bird_view_image)
+                if pixmap:
+                    self._scale_and_set_pixmap('bird_view_label', pixmap,
+                                             self.adaptive_image_width,
+                                             self.adaptive_bird_height)
                 else:
-                    # 灰度图像处理
-                    try:
-                        # 将灰度图像转换为彩色以便更好的可视化
-                        colorized = cv2.cvtColor(self.bird_view_image, cv2.COLOR_GRAY2RGB)
-                        bytes_per_line = 3 * width
-                        
-                        # 创建QImage
-                        q_image = QImage(colorized.data, width, height, bytes_per_line, QImage.Format_RGB888)
-                    except Exception as e:
-                        print(f"灰度图像转换失败: {str(e)}")
-                        # 如果转换失败，显示错误信息
-                        self.bird_view_label.setText(f"<div style='font-size: 12pt; color: #E74C3C; text-align: center; margin-top: 100px;'>灰度图像处理错误:<br>{str(e)}</div>")
-                        return
-                
-                # 创建QPixmap并设置到标签
-                try:
-                    pixmap = QPixmap.fromImage(q_image)
-                    
-                    # 检查pixmap是否为空
-                    if pixmap.isNull():
-                        self.bird_view_label.setText("<div style='font-size: 12pt; color: #E74C3C; text-align: center; margin-top: 100px;'>无法创建有效图像</div>")
-                        return
-                        
-                    # 设置图像到标签，保持宽高比
-                    self.bird_view_label.setPixmap(pixmap.scaled(
-                        640, 
-                        240,
-                        Qt.KeepAspectRatio, 
-                        Qt.SmoothTransformation
-                    ))
-                except Exception as e:
-                    print(f"设置鸟瞰图像到UI失败: {str(e)}")
-                    self.bird_view_label.setText(f"<div style='font-size: 12pt; color: #E74C3C; text-align: center; margin-top: 100px;'>图像显示错误:<br>{str(e)}</div>")
+                    self._show_bird_view_placeholder("图像转换失败")
             else:
-                # 无图像时显示默认文本
-                if hasattr(self, 'bird_view_label') and self.bird_view_label:
-                    if not self.topic_subscriber:
-                        # 未启动订阅器时显示提示信息
-                        self.bird_view_label.setText("<div style='font-size: 14pt; color: #3498DB; text-align: center; margin-top: 100px;'>正在自动连接话题，请稍候...</div>")
-                    else:
-                        topic_active = self.topic_subscriber.is_topic_active("bird_view")
-                        # 移除调试打印，减少控制台输出
-                        if not topic_active:
-                            self.bird_view_label.setText("<div style='font-size: 14pt; color: #3498DB; text-align: center; margin-top: 100px;'>等待鸟瞰图话题连接...</div>")
-                        else:
-                            self.bird_view_label.setText("<div style='font-size: 14pt; color: #3498DB; text-align: center; margin-top: 100px;'>等待鸟瞰图数据...</div>")
+                self._show_bird_view_placeholder("等待鸟瞰图数据...")
+
         except Exception as e:
-            # 捕获所有异常并显示友好的错误信息
-            try:
-                self.bird_view_label.setText(f"<div style='font-size: 12pt; color: #E74C3C; text-align: center; margin-top: 100px;'>鸟瞰图显示错误:<br>{str(e)}</div>")
-            except:
-                pass  # 如果连错误信息都无法显示，就不做任何操作
-            print(f"鸟瞰图显示更新错误: {str(e)}")
+            print(f"更新鸟瞰图显示时出错: {str(e)}")
+            self._show_bird_view_placeholder(f"显示错误: {str(e)}")
+
+    def _show_bird_view_placeholder(self, message):
+        """显示鸟瞰图占位符"""
+        if hasattr(self, 'bird_view_label'):
+            self.bird_view_label.setText(f"<div style='font-size: 12pt; color: #3498DB; text-align: center; margin-top: 50px;'>{message}</div>")
     
     # 添加人员位置管理功能
     def addPerson(self):
@@ -3617,13 +4306,15 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
                     QTimer.singleShot(200, self.updateImageSizes)
                     # 延迟更新表格列宽
                     QTimer.singleShot(250, self.setupTableColumnWidths)
+                    # 延迟更新悬浮窗口位置
+                    QTimer.singleShot(300, self._update_overlay_positions)
 
             # 小窗口模式下简化功能组标题，避免截断
             if hasattr(self, 'function_group'):
                 if window_width < 1600:
-                    self.function_group.setTitle(" 控制中心 ")
+                    self.function_group.setTitle("🎮 控制中心")
                 else:
-                    self.function_group.setTitle("   控制中心   ")
+                    self.function_group.setTitle("🎮 控制中心")
 
             # 调用原始的resizeEvent
             QMainWindow.resizeEvent(self, event)
@@ -3632,42 +4323,58 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
             # 确保原始事件被处理
             QMainWindow.resizeEvent(self, event)
     
-    def updateCameraImage(self, camera_data):
-        """处理摄像头图像更新"""
-        try:
-            if not camera_data or camera_data["image"] is None:
-                return
-                
-            # 保存最新图像
-            self.camera_image = camera_data["image"]
-            
-        except Exception as e:
-            print(f"处理图像更新时出错: {str(e)}")
+
 
     def marker_callback(self, marker_data):
-        """处理visualization_marker话题的回调函数"""
+        """处理visualization_marker话题的回调函数 - 安全版本"""
         try:
-            # 提取标记ID并检查是否已添加过
+            # 验证输入数据
+            if not marker_data or not isinstance(marker_data, dict):
+                print("标记数据无效或为空")
+                return
+
+            # 安全地提取标记ID
+            if "id" not in marker_data:
+                print("标记数据中缺少ID字段")
+                return
+
             marker_id = marker_data["id"]
+            if not isinstance(marker_id, int):
+                print(f"标记ID不是整数: {marker_id}")
+                return
+
             if marker_id % 2 == 0:  # 球体标记的ID是偶数
                 ball_id = marker_id // 2  # 获取实际的球体ID
-                
+
                 # 检查是否已添加过该标记
                 if ball_id not in self.detected_markers:
-                    # 获取小球坐标
-                    x = marker_data["pose"]["position"]["x"]
-                    y = marker_data["pose"]["position"]["y"]
-                    z = marker_data["pose"]["position"]["z"]
-                    
+                    # 安全地获取小球坐标
+                    try:
+                        x = marker_data["pose"]["position"]["x"]
+                        y = marker_data["pose"]["position"]["y"]
+                        z = marker_data["pose"]["position"]["z"]
+
+                        # 验证坐标是否为有效数值
+                        if not all(isinstance(coord, (int, float)) for coord in [x, y, z]):
+                            print(f"坐标数据无效: x={x}, y={y}, z={z}")
+                            return
+
+                    except (KeyError, TypeError) as e:
+                        print(f"提取坐标数据时出错: {str(e)}")
+                        return
+
                     # 添加到表格中
                     self._add_marker_to_table(ball_id, x, y, z)
-                    
+
                     # 标记为已添加
                     self.detected_markers.add(ball_id)
-                    
+
                     print(f"检测到新的标记点: ID={ball_id}, 位置: x={x:.2f}, y={y:.2f}, z={z:.2f}")
+
         except Exception as e:
             print(f"处理标记点数据时出错: {str(e)}")
+            import traceback
+            traceback.print_exc()
 
     def _add_marker_to_table(self, ball_id, x, y, z):
         """将检测到的标记点添加到人员位置表格"""
@@ -3701,6 +4408,20 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
             self.position_table.scrollToItem(self.position_table.item(row_position, 0))
         except Exception as e:
             print(f"添加标记点到表格时出错: {str(e)}")
+            import traceback
+            traceback.print_exc()
+
+            # 如果添加行失败，尝试清理
+            try:
+                if hasattr(self, 'position_table') and self.position_table:
+                    current_rows = self.position_table.rowCount()
+                    if current_rows > 0:
+                        # 检查最后一行是否为空，如果是则删除
+                        last_row = current_rows - 1
+                        if self.position_table.item(last_row, 0) is None:
+                            self.position_table.removeRow(last_row)
+            except:
+                pass  # 忽略清理时的错误
             
     def load_ball_screenshot(self, ball_id):
         """加载小球的预先保存的截图"""
@@ -3838,23 +4559,8 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
             progress_dialog.setValue(70)
             QApplication.processEvents()
             
-            # 基于用户提供的stop.sh脚本中的模式列表
-            process_patterns = [
-                "sh shfiles/run.sh",
-                "roslaunch mavros px4.launch",
-                "roslaunch vins fast_drone_250.launch",
-                "roslaunch onboard_detector run_detector.launch",
-                "roslaunch px4ctrl run_ctrl.launch",
-                "roslaunch ego_planner single_run_in_exp.launch",
-                "roslaunch realsense2_camera rs_camera.launch",
-                "vins_to_mavros_node",
-                "pose_to_odom_converter_node",
-                "roslaunch exploration_manager exploration.launch",
-                "roslaunch yolo_detector yolo_ros.launch",
-                "roslaunch sort_ros sort_ros.launch",
-                "python3 marker_wenzi_jisuan.py",
-                "rosrun exploration_manager fuel_nav"
-            ]
+            # 使用全局常量避免重复定义
+            process_patterns = PROCESS_PATTERNS
             
             # 使用pkill强制终止每个模式的进程
             for i, pattern in enumerate(process_patterns):
@@ -4068,10 +4774,10 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
             
             if hasattr(self, 'connection_label'):
                 self.connection_label.setText("未连接")
+                # 不设置字体大小，保持卡片的原始字体设置
                 self.connection_label.setStyleSheet("""
                     QLabel {
                         color: #E74C3C;
-                        font-size: 14pt;
                         font-weight: bold;
                         background: transparent;
                         border: none;
@@ -4216,7 +4922,7 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         # 创建水平布局
         overlay_layout = QHBoxLayout(self.rviz_overlay)
         overlay_layout.setContentsMargins(12, 6, 12, 6)
-        overlay_layout.setSpacing(6)  # 减小间距
+        overlay_layout.setSpacing(3)  # 进一步减小间距
         
         # 定义要显示的信息项和对应图标
         info_items = [
@@ -4273,35 +4979,40 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         
         # 更新位置的函数
         def updateOverlayPosition():
-            if hasattr(self, 'frame') and self.frame:
-                frame_rect = self.frame.geometry()
-                frame_pos = self.frame.mapToGlobal(QPoint(0, 0))
-                
-                # 不再动态设置宽度，使用固定宽度
-                
-                # 居中显示在上方
-                x_pos = frame_pos.x() + (frame_rect.width() - self.rviz_overlay.width()) // 2
-                y_pos = frame_pos.y() + 20
-                
-                # 移动窗口
-                self.rviz_overlay.move(x_pos, y_pos)
-                
-                # 确保窗口可见
-                if not self.rviz_overlay.isVisible():
-                    self.rviz_overlay.show()
+            try:
+                if hasattr(self, 'frame') and self.frame and hasattr(self, 'rviz_overlay') and self.rviz_overlay:
+                    # 确保RViz框架已经完成布局更新
+                    self.frame.update()
+                    QApplication.processEvents()
+
+                    # 直接使用RViz框架的几何信息，因为它已经考虑了分割器的布局
+                    frame_rect = self.frame.geometry()
+                    frame_pos = self.frame.mapToGlobal(QPoint(0, 0))
+
+                    # 检查几何信息是否有效
+                    if frame_rect.width() > 0 and frame_rect.height() > 0:
+                        # 居中显示在RViz框架上方
+                        x_pos = frame_pos.x() + (frame_rect.width() - self.rviz_overlay.width()) // 2
+                        y_pos = frame_pos.y() + 20
+
+                        # 移动窗口
+                        self.rviz_overlay.move(x_pos, y_pos)
+
+                        # 确保窗口可见
+                        if not self.rviz_overlay.isVisible():
+                            self.rviz_overlay.show()
+            except Exception as e:
+                print(f"更新信息条位置时出错: {e}")
         
-        # 创建窗口移动和大小变化事件处理函数
-        self.frame_move_timer = QTimer(self)
-        self.frame_move_timer.timeout.connect(updateOverlayPosition)
-        self.frame_move_timer.start(50)  # 50毫秒更新一次位置
-        
+        # 将函数保存为类实例方法，以便后续修改
+        self.updateOverlayPosition = updateOverlayPosition
+
+        # 立即显示悬浮面板
+        self.rviz_overlay.show()
+
+        # 注意：悬浮组件的位置更新已合并到主更新循环中，减少定时器数量
         # 初始位置更新
         QTimer.singleShot(100, updateOverlayPosition)
-        
-        # 更新数据的定时器
-        self.data_update_timer = QTimer(self)
-        self.data_update_timer.timeout.connect(self.updateOverlayData)
-        self.data_update_timer.start(300)  # 降低更新频率到300ms
 
     def updateOverlayData(self):
         """更新信息条数据"""
@@ -4468,23 +5179,8 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
                 self.processes = {}
             
             # 使用强大的终止机制，确保所有相关进程都被终止
-            # 基于用户提供的stop.sh脚本中的模式列表
-            process_patterns = [
-                "sh shfiles/run.sh",
-                "roslaunch mavros px4.launch",
-                "roslaunch vins fast_drone_250.launch",
-                "roslaunch onboard_detector run_detector.launch",
-                "roslaunch px4ctrl run_ctrl.launch",
-                "roslaunch ego_planner single_run_in_exp.launch",
-                "roslaunch realsense2_camera rs_camera.launch",
-                "vins_to_mavros_node",
-                "pose_to_odom_converter_node",
-                "roslaunch exploration_manager exploration.launch",
-                "roslaunch yolo_detector yolo_ros.launch",
-                "roslaunch sort_ros sort_ros.launch",
-                "python3 marker_wenzi_jisuan.py",
-                "rosrun exploration_manager fuel_nav"
-            ]
+            # 使用全局常量避免重复定义
+            process_patterns = PROCESS_PATTERNS
             
             # 使用pkill强制终止每个模式的进程
             for pattern in process_patterns:
@@ -4551,70 +5247,39 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         
         # 定义位置更新函数
         def updateCompassPosition():
-            if hasattr(self, 'frame') and self.frame:
-                frame_rect = self.frame.geometry()
-                frame_pos = self.frame.mapToGlobal(QPoint(0, 0))
-                
-                # 放在右下角，增加边距让它更靠左上方一些
-                margin_x = 60  # 增加水平边距
-                margin_y = 50  # 增加垂直边距
-                x_pos = frame_pos.x() + frame_rect.width() - self.compass.width() - margin_x
-                y_pos = frame_pos.y() + frame_rect.height() - self.compass.height() - margin_y
-                
-                # 移动窗口
-                self.compass.move(x_pos, y_pos)
-                
-                # 确保窗口可见
-                if not self.compass.isVisible():
-                    self.compass.show()
+            try:
+                if hasattr(self, 'frame') and self.frame and hasattr(self, 'compass') and self.compass:
+                    # 确保RViz框架已经完成布局更新
+                    self.frame.update()
+                    QApplication.processEvents()
+
+                    # 直接使用RViz框架的几何信息
+                    frame_rect = self.frame.geometry()
+                    frame_pos = self.frame.mapToGlobal(QPoint(0, 0))
+
+                    # 检查几何信息是否有效
+                    if frame_rect.width() > 0 and frame_rect.height() > 0:
+                        # 放在RViz框架的右下角，增加边距让它更靠左上方一些
+                        margin_x = 60  # 增加水平边距
+                        margin_y = 50  # 增加垂直边距
+                        x_pos = frame_pos.x() + frame_rect.width() - self.compass.width() - margin_x
+                        y_pos = frame_pos.y() + frame_rect.height() - self.compass.height() - margin_y
+
+                        # 移动窗口
+                        self.compass.move(x_pos, y_pos)
+
+                        # 确保窗口可见
+                        if not self.compass.isVisible():
+                            self.compass.show()
+            except Exception as e:
+                print(f"更新指南针位置时出错: {e}")
         
         # 将函数保存为类实例方法，以便后续修改
         self.updateCompassPosition = updateCompassPosition
         
-        # 创建窗口移动和大小变化事件处理函数
-        self.compass_move_timer = QTimer(self)
-        self.compass_move_timer.timeout.connect(updateCompassPosition)
-        self.compass_move_timer.start(50)  # 50毫秒更新一次位置
-        
+        # 注意：指南针的位置和数据更新已合并到主更新循环中
         # 初始位置更新
         QTimer.singleShot(100, updateCompassPosition)
-        
-        # 创建更新数据的函数
-        def updateCompassData():
-            try:
-                if hasattr(self, 'topic_subscriber') and self.topic_subscriber:
-                    # 尝试从姿态数据获取航向信息
-                    attitude_data = self.topic_subscriber.get_latest_data("attitude")
-                    if attitude_data and "yaw" in attitude_data:
-                        # 获取原始yaw值
-                        yaw_value = attitude_data.get("yaw", 0)
-                        if isinstance(yaw_value, list):
-                            if len(yaw_value) > 0:
-                                yaw_value = yaw_value[0]  # 取列表的第一个元素
-                            else:
-                                yaw_value = 0  # 空列表时使用默认值
-                        
-                        # # 将yaw值转换为角度（如果它已经是角度，则不需要转换）
-                        # # 确保角度在-360到360度范围内
-                        # heading = math.degrees(yaw_value) if isinstance(yaw_value, float) else yaw_value
-                        
-                        # 限制在360度范围内
-                        if yaw_value > 360:
-                            yaw_value = yaw_value % 360
-                        elif yaw_value < -360:
-                            yaw_value = yaw_value % 360
-                            
-                        # 直接使用yaw值作为指南针角度
-                        self.compass.set_heading(-yaw_value)
-                    
-                    # 注意：已移除GPS航向获取部分，确保只使用attitude中的yaw值
-            except Exception as e:
-                print(f"更新指南针数据时出错: {str(e)}")
-        
-        # 创建定时更新的定时器
-        self.compass_update_timer = QTimer(self)
-        self.compass_update_timer.timeout.connect(updateCompassData)
-        self.compass_update_timer.start(100)  # 10Hz更新频率
 
     def setupAttitudeWidget(self):
         """创建姿态指示器组件并添加到RViz右下角，独立窗口但跟随RViz框架移动"""
@@ -4626,69 +5291,46 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
         
         # 定义位置更新函数 - 直接基于RViz框架位置计算
         def updateAttitudeWidgetPosition():
-            if hasattr(self, 'frame') and self.frame:
-                frame_rect = self.frame.geometry()
-                frame_pos = self.frame.mapToGlobal(QPoint(0, 0))
-                
-                # 放在右下角位置，与指南针并排
-                margin_x = 260  # 增加水平边距，放在指南针左侧
-                margin_y = 50   # 垂直边距与指南针相同
-                x_pos = frame_pos.x() + frame_rect.width() - self.attitude_widget.width() - margin_x
-                y_pos = frame_pos.y() + frame_rect.height() - self.attitude_widget.height() - margin_y
-                
-                # 确保不会移出窗口左侧
-                if x_pos < frame_pos.x() + 20:
-                    # 如果左侧空间不足，放在上方
-                    x_pos = frame_pos.x() + frame_rect.width() - self.attitude_widget.width() - 60
-                    y_pos = frame_pos.y() + frame_rect.height() - self.attitude_widget.height() - 240
-                
-                # 移动窗口
-                self.attitude_widget.move(x_pos, y_pos)
-                
-                # 确保窗口可见
-                if not self.attitude_widget.isVisible():
-                    self.attitude_widget.show()
+            try:
+                if hasattr(self, 'frame') and self.frame and hasattr(self, 'attitude_widget') and self.attitude_widget:
+                    # 确保RViz框架已经完成布局更新
+                    self.frame.update()
+                    QApplication.processEvents()
+
+                    # 直接使用RViz框架的几何信息
+                    frame_rect = self.frame.geometry()
+                    frame_pos = self.frame.mapToGlobal(QPoint(0, 0))
+
+                    # 检查几何信息是否有效
+                    if frame_rect.width() > 0 and frame_rect.height() > 0:
+                        # 放在RViz框架的右下角位置，与指南针并排
+                        margin_x = 260  # 增加水平边距，放在指南针左侧
+                        margin_y = 50   # 垂直边距与指南针相同
+                        x_pos = frame_pos.x() + frame_rect.width() - self.attitude_widget.width() - margin_x
+                        y_pos = frame_pos.y() + frame_rect.height() - self.attitude_widget.height() - margin_y
+
+                        # 确保不会移出RViz框架左侧
+                        min_x = frame_pos.x() + 20
+                        if x_pos < min_x:
+                            # 如果左侧空间不足，放在上方
+                            x_pos = frame_pos.x() + frame_rect.width() - self.attitude_widget.width() - 60
+                            y_pos = frame_pos.y() + frame_rect.height() - self.attitude_widget.height() - 240
+
+                        # 移动窗口
+                        self.attitude_widget.move(x_pos, y_pos)
+
+                        # 确保窗口可见
+                        if not self.attitude_widget.isVisible():
+                            self.attitude_widget.show()
+            except Exception as e:
+                print(f"更新姿态指示器位置时出错: {e}")
         
         # 将函数保存为类实例方法，以便后续修改
         self.updateAttitudeWidgetPosition = updateAttitudeWidgetPosition
-        
-        # 创建窗口移动和大小变化事件处理函数
-        self.attitude_move_timer = QTimer(self)
-        self.attitude_move_timer.timeout.connect(updateAttitudeWidgetPosition)
-        self.attitude_move_timer.start(50)  # 50毫秒更新一次位置
-        
+
+        # 注意：姿态指示器的位置更新已合并到主更新循环中，减少定时器数量
         # 初始位置更新
         QTimer.singleShot(100, updateAttitudeWidgetPosition)
-        
-        # 创建更新数据的函数
-        def updateAttitudeWidgetData():
-            if hasattr(self, 'topic_subscriber') and self.topic_subscriber:
-                # 从姿态数据获取俯仰和滚转角度
-                attitude_data = self.topic_subscriber.get_latest_data("attitude")
-                if attitude_data:
-                    # 获取俯仰角并检查是否为列表
-                    pitch_value = attitude_data.get("pitch", 0)
-                    if isinstance(pitch_value, list):
-                        if len(pitch_value) > 0:
-                            pitch_value = pitch_value[0]
-                        else:
-                            pitch_value = 0
-                    
-                    # 获取滚转角并检查是否为列表
-                    roll_value = attitude_data.get("roll", 0)
-                    if isinstance(roll_value, list):
-                        if len(roll_value) > 0:
-                            roll_value = roll_value[0]
-                        else:
-                            roll_value = 0
-                    
-                    # 更新姿态指示器
-                    self.attitude_widget.update_attitude(pitch_value, roll_value)
-        
-        # 创建定时更新的定时器
-        self.attitude_widget_update_timer = QTimer(self)
-        self.attitude_widget_update_timer.timeout.connect(updateAttitudeWidgetData)
-        self.attitude_widget_update_timer.start(50)  # 20Hz更新频率
 
     def setupAllOverlays(self):
         """同时创建所有悬浮窗口组件，确保它们同时显示"""
@@ -4833,109 +5475,174 @@ class MyViz(QMainWindow):  # 使用QMainWindow替代QWidget
 
     def on_position_table_cell_clicked(self, row, column):
         """处理位置表格单元格点击事件"""
-        # 只处理截图列的点击
-        if column == 4:  # 截图列
-            ball_id = int(self.position_table.item(row, 0).text())
-            if ball_id in self.ball_screenshots:
-                # 显示截图对话框
-                self.show_screenshot_dialog(ball_id)
+        try:
+            # 只处理截图列的点击
+            if column == 4:  # 截图列
+                # 安全地获取ball_id
+                item = self.position_table.item(row, 0)
+                if item is None:
+                    print(f"表格行 {row} 的ID列为空")
+                    return
+
+                try:
+                    ball_id = int(item.text())
+                except ValueError:
+                    print(f"无法解析ball_id: {item.text()}")
+                    return
+
+                # 检查截图列的内容
+                screenshot_item = self.position_table.item(row, 4)
+                if screenshot_item is None or screenshot_item.text() != "查看截图":
+                    print(f"小球 {ball_id} 没有可用的截图")
+                    return
+
+                if ball_id in self.ball_screenshots:
+                    # 显示截图对话框
+                    self.show_screenshot_dialog(ball_id)
+                else:
+                    print(f"未找到小球 {ball_id} 的截图数据")
+
+        except Exception as e:
+            print(f"处理表格点击事件时出错: {str(e)}")
+            import traceback
+            traceback.print_exc()
     
     def show_screenshot_dialog(self, ball_id):
         """显示小球截图对话框"""
-        if ball_id not in self.ball_screenshots:
-            return
-        
-        # 获取截图
-        screenshot_data = self.ball_screenshots[ball_id]
-        
-        # 创建对话框
-        dialog = QDialog(self)
-        dialog.setWindowTitle(f"小球ID {ball_id} 截图")
-        dialog.setMinimumSize(640, 480)
-        
-        # 创建布局
-        layout = QVBoxLayout(dialog)
-        
-        # 创建图像标签
-        image_label = QLabel()
-        
-        # 如果有图像数据，显示图像
-        if "image" in screenshot_data and screenshot_data["image"] is not None:
-            # 将OpenCV图像转换为Qt图像
-            height, width, channel = screenshot_data["image"].shape
-            bytesPerLine = 3 * width
-            qImg = QImage(screenshot_data["image"].data, width, height, bytesPerLine, QImage.Format_RGB888)
-            pixmap = QPixmap.fromImage(qImg)
-            image_label.setPixmap(pixmap)
-            image_label.setScaledContents(True)
-        elif "path" in screenshot_data and os.path.exists(screenshot_data["path"]):
-            # 从文件加载图像
-            pixmap = QPixmap(screenshot_data["path"])
-            image_label.setPixmap(pixmap)
-            image_label.setScaledContents(True)
-        else:
-            image_label.setText("截图不可用")
-        
-        # 添加到布局
-        layout.addWidget(image_label)
-        
-        # 添加关闭按钮
-        close_button = QPushButton("关闭")
-        close_button.clicked.connect(dialog.accept)
-        layout.addWidget(close_button)
-        
-        # 显示对话框
-        dialog.exec_()
-
-    def closeEvent(self, event):
-        """窗口关闭事件处理，确保关闭时清理所有资源和进程"""
-        self.handleCloseEvent(event)
-        
-    def handleCloseEvent(self, event):
-        """关闭事件处理函数，确保关闭时清理资源"""
-        # 关闭所有悬浮窗口
-        if hasattr(self, 'rviz_overlay') and self.rviz_overlay:
-            self.rviz_overlay.close()
-        
-        if hasattr(self, 'compass') and self.compass:
-            self.compass.close()
-            
-        if hasattr(self, 'attitude_widget') and self.attitude_widget:
-            self.attitude_widget.close()
-            
-        # 停止所有定时器
-        if hasattr(self, 'frame_move_timer') and self.frame_move_timer:
-            self.frame_move_timer.stop()
-            
-        if hasattr(self, 'compass_move_timer') and self.compass_move_timer:
-            self.compass_move_timer.stop()
-            
-        if hasattr(self, 'attitude_move_timer') and self.attitude_move_timer:
-            self.attitude_move_timer.stop()
-        
-        if hasattr(self, 'topic_status_timer') and self.topic_status_timer:
-            self.topic_status_timer.stop()
-            
-        # 静默关闭后台程序（不显示任何对话框）
         try:
-            self.silentStopDroneSystem()
-            
-            # 确保话题数据状态重置
-            self.topics_with_data = {
-                "battery": False,
-                "status": False,
-                "odometry": False,
-                "velocity": False,
-                "camera": False,
-                "depth": False,
-                "bird_view": False,
-                "marker": False
-            }
+            if ball_id not in self.ball_screenshots:
+                print(f"未找到小球 {ball_id} 的截图数据")
+                return
+
+            # 获取截图数据
+            screenshot_data = self.ball_screenshots[ball_id]
+
+            # 创建对话框
+            dialog = QDialog(self)
+
+            # 保存对话框引用，防止被垃圾回收
+            if not hasattr(self, 'screenshot_dialogs'):
+                self.screenshot_dialogs = []
+            self.screenshot_dialogs.append(dialog)
+            dialog.setWindowTitle(f"小球ID {ball_id} 截图")
+            dialog.setMinimumSize(640, 480)
+            dialog.setModal(False)  # 设置为非模态对话框，允许自由拖动
+
+            # 设置窗口标志，确保可以拖动和调整大小
+            dialog.setWindowFlags(Qt.Window | Qt.WindowTitleHint | Qt.WindowCloseButtonHint |
+                                Qt.WindowMinMaxButtonsHint | Qt.WindowSystemMenuHint)
+
+            # 设置窗口可调整大小
+            dialog.setSizeGripEnabled(True)
+
+            # 创建布局
+            layout = QVBoxLayout(dialog)
+
+            # 创建图像标签
+            image_label = QLabel()
+            image_label.setAlignment(Qt.AlignCenter)
+            image_label.setStyleSheet("border: 1px solid #3498DB; background-color: #1E2330;")
+
+            # 安全地加载和显示图像
+            success = False
+            if "path" in screenshot_data and os.path.exists(screenshot_data["path"]):
+                try:
+                    # 使用OpenCV安全地加载图像
+                    cv_image = cv2.imread(screenshot_data["path"])
+                    if cv_image is not None:
+                        # 转换颜色格式从BGR到RGB
+                        rgb_image = cv2.cvtColor(cv_image, cv2.COLOR_BGR2RGB)
+                        height, width, channel = rgb_image.shape
+
+                        # 创建QImage时确保数据连续性
+                        bytes_per_line = 3 * width
+                        q_image = QImage(rgb_image.data, width, height, bytes_per_line, QImage.Format_RGB888)
+
+                        # 创建QPixmap的副本以确保数据安全
+                        pixmap = QPixmap.fromImage(q_image.copy())
+
+                        if not pixmap.isNull():
+                            # 缩放图像以适应对话框
+                            scaled_pixmap = pixmap.scaled(600, 400, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                            image_label.setPixmap(scaled_pixmap)
+                            success = True
+                            print(f"成功加载小球 {ball_id} 的截图")
+                        else:
+                            print(f"创建QPixmap失败: {screenshot_data['path']}")
+                    else:
+                        print(f"OpenCV无法读取图像文件: {screenshot_data['path']}")
+                except Exception as e:
+                    print(f"加载截图时出错: {str(e)}")
+
+            if not success:
+                # 如果加载失败，显示错误信息
+                image_label.setText(f"""
+                    <div style='
+                        color: #E74C3C;
+                        font-size: 16pt;
+                        text-align: center;
+                        padding: 50px;
+                    '>
+                        截图加载失败<br>
+                        小球ID: {ball_id}
+                    </div>
+                """)
+
+            # 添加到布局
+            layout.addWidget(image_label)
+
+            # 添加关闭按钮
+            close_button = QPushButton("关闭")
+            close_button.setStyleSheet("""
+                QPushButton {
+                    background-color: #3498DB;
+                    color: white;
+                    border: none;
+                    border-radius: 4px;
+                    padding: 8px 16px;
+                    font-weight: bold;
+                }
+                QPushButton:hover {
+                    background-color: #2980B9;
+                }
+            """)
+            # 连接关闭按钮，确保正确清理对话框
+            def close_dialog():
+                if hasattr(self, 'screenshot_dialogs') and dialog in self.screenshot_dialogs:
+                    self.screenshot_dialogs.remove(dialog)
+                dialog.close()
+
+            close_button.clicked.connect(close_dialog)
+            layout.addWidget(close_button)
+
+            # 设置对话框关闭事件处理
+            def on_dialog_close(event):
+                if hasattr(self, 'screenshot_dialogs') and dialog in self.screenshot_dialogs:
+                    self.screenshot_dialogs.remove(dialog)
+                event.accept()
+
+            dialog.closeEvent = on_dialog_close
+
+            # 显示对话框（非阻塞方式）
+            dialog.show()
+            dialog.raise_()  # 将窗口提到前台
+            dialog.activateWindow()  # 激活窗口
+
         except Exception as e:
-            print(f"静默关闭程序时出错: {str(e)}")
-            
-        # 接受关闭事件
-        event.accept()
+            print(f"显示截图对话框时出错: {str(e)}")
+            # 显示错误对话框
+            error_dialog = QDialog(self)
+            error_dialog.setWindowTitle("错误")
+            error_dialog.setMinimumSize(300, 150)
+            error_layout = QVBoxLayout(error_dialog)
+            error_label = QLabel(f"显示截图时出错:\n{str(e)}")
+            error_layout.addWidget(error_label)
+            error_button = QPushButton("确定")
+            error_button.clicked.connect(error_dialog.accept)
+            error_layout.addWidget(error_button)
+            error_dialog.exec_()
+
+    # 注意：closeEvent方法已在上面优化实现，删除重复代码
 
 ## Start the Application
 ## ^^^^^^^^^^^^^^^^^^^^^
@@ -5022,8 +5729,12 @@ if __name__ == '__main__':
     app_icon = QIcon("logo.png")
     app.setWindowIcon(app_icon)
     
-    # 确保应用程序支持中文
-    QTextCodec.setCodecForLocale(QTextCodec.codecForName("UTF-8"))
+    # 确保应用程序支持中文（如果QTextCodec可用）
+    if QTextCodec is not None:
+        try:
+            QTextCodec.setCodecForLocale(QTextCodec.codecForName("UTF-8"))
+        except Exception as e:
+            print(f"设置编码时出错: {e}")
     
     # 检查并自动启动roscore
     check_and_start_roscore()
@@ -5036,7 +5747,14 @@ if __name__ == '__main__':
         print(f"警告: ROS节点初始化失败: {str(e)}")
     
     # 创建主窗口
-    myviz = MyViz()
+    try:
+        myviz = MyViz()
+        print("主窗口创建成功")
+    except Exception as e:
+        print(f"创建主窗口时出错: {e}")
+        import traceback
+        traceback.print_exc()
+        sys.exit(1)
 
     # 不要使用自定义布局，避免"already has a layout"错误
     # myviz.setLayout(main_layout) # 删除这一行

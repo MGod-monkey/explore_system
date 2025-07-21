@@ -23,6 +23,9 @@ env/
 htmlcov/
 .pytest_cache/
 screenshots/
+ball_screenshots/
+build_package/
+drone_search_system_release/
 
 # 构建和分发目录
 build/
