@@ -27,7 +27,34 @@ def check_dependencies():
     
     for package in required_packages:
         try:
-            __import__(package.replace('-', '_'))
+            if package == 'pyinstaller':
+                # 特殊处理PyInstaller检查
+                pyinstaller_found = False
+
+                # 方法1: 检查Python模块
+                try:
+                    __import__('PyInstaller')
+                    pyinstaller_found = True
+                except ImportError:
+                    pass
+
+                # 方法2: 检查用户本地路径
+                if not pyinstaller_found:
+                    local_pyinstaller = os.path.expanduser("~/.local/bin/pyinstaller")
+                    if os.path.exists(local_pyinstaller):
+                        pyinstaller_found = True
+
+                # 方法3: 检查系统路径
+                if not pyinstaller_found:
+                    result = subprocess.run(['which', 'pyinstaller'],
+                                          capture_output=True, text=True)
+                    if result.returncode == 0:
+                        pyinstaller_found = True
+
+                if not pyinstaller_found:
+                    raise ImportError()
+            else:
+                __import__(package.replace('-', '_'))
             print(f"✅ {package} 已安装")
         except ImportError:
             missing_packages.append(package)
@@ -150,7 +177,16 @@ a = Analysis(
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],
-    excludes=[],
+    excludes=[
+        'PySide2',
+        'PySide2.QtCore',
+        'PySide2.QtWidgets',
+        'PySide2.QtGui',
+        'tkinter',
+        'matplotlib',
+        'IPython',
+        'jupyter',
+    ],
     win_no_prefer_redirects=False,
     win_private_assemblies=False,
     cipher=block_cipher,
@@ -257,16 +293,35 @@ echo "程序已退出"
 def build_executable(build_dir, spec_file):
     """构建可执行文件"""
     print("\n=== 构建可执行文件 ===")
-    
+
+    # 查找PyInstaller的路径
+    pyinstaller_paths = [
+        os.path.expanduser("~/.local/bin/pyinstaller"),
+        "/usr/local/bin/pyinstaller",
+        "/usr/bin/pyinstaller"
+    ]
+
+    pyinstaller_cmd = None
+    for path in pyinstaller_paths:
+        if os.path.exists(path):
+            pyinstaller_cmd = path
+            break
+
+    if not pyinstaller_cmd:
+        # 尝试使用python -m pyinstaller
+        pyinstaller_cmd = "python3 -m PyInstaller"
+
+    print(f"使用PyInstaller: {pyinstaller_cmd}")
+
     # 切换到构建目录
     original_dir = os.getcwd()
     os.chdir(build_dir)
-    
+
     try:
         # 运行PyInstaller
-        cmd = f"pyinstaller --clean {spec_file.name}"
+        cmd = f"{pyinstaller_cmd} --clean {spec_file.name}"
         print(f"运行命令: {cmd}")
-        
+
         result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
         
         if result.returncode == 0:
@@ -311,12 +366,15 @@ def create_package(build_dir, exe_file):
         # 重命名为与安装脚本期望的名称一致
         shutil.copy2(startup_script, package_dir / "run_drone_system.sh")
 
-    # 复制必要的配置文件
-    config_files = ["my_config.rviz", "topics_config.json", "logo.png"]
+    # 复制必要的配置文件和脚本
+    config_files = ["my_config.rviz", "topics_config.json", "logo.png", "install_desktop_icon.sh"]
     for config_file in config_files:
         src_file = build_dir / config_file
         if src_file.exists():
             shutil.copy2(src_file, package_dir)
+            # 确保脚本文件有执行权限
+            if config_file.endswith('.sh'):
+                os.chmod(package_dir / config_file, 0o755)
 
     # 复制资源目录
     resource_src = build_dir / "resource"

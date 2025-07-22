@@ -26,6 +26,7 @@ screenshots/
 ball_screenshots/
 build_package/
 drone_search_system_release/
+build_executable/
 
 # 构建和分发目录
 build/
