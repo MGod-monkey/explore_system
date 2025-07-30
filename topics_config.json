@@ -12,7 +12,7 @@
         "fields": ["connected", "armed", "guided", "mode"]
     },
     "odometry": {
-        "topic": "/converted_odom",
+        "topic": "/vins_fusion/imu_propagate",
         "msg_type": "nav_msgs/Odometry",
         "description": "无人机位置信息",
         "fields": ["pose", "twist"]

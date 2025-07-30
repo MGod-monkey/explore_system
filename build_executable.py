@@ -367,14 +367,18 @@ def create_package(build_dir, exe_file):
         shutil.copy2(startup_script, package_dir / "run_drone_system.sh")
 
     # 复制必要的配置文件和脚本
-    config_files = ["my_config.rviz", "topics_config.json", "logo.png", "install_desktop_icon.sh"]
+    config_files = ["my_config.rviz", "topics_config.json", "logo.png"]
     for config_file in config_files:
         src_file = build_dir / config_file
         if src_file.exists():
             shutil.copy2(src_file, package_dir)
-            # 确保脚本文件有执行权限
-            if config_file.endswith('.sh'):
-                os.chmod(package_dir / config_file, 0o755)
+
+    # 复制安装脚本（从工作目录根目录）
+    install_script = Path.cwd() / "install_desktop_icon.sh"
+    if install_script.exists():
+        shutil.copy2(install_script, package_dir)
+        # 确保脚本文件有执行权限
+        os.chmod(package_dir / "install_desktop_icon.sh", 0o755)
 
     # 复制资源目录
     resource_src = build_dir / "resource"

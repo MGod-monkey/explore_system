@@ -42,5 +42,9 @@
         <file>images/icons/needle2.png</file>
         <file>images/icons/pointy.png</file>
         <file>images/icons/speedobg.png</file>
+        <file>images/icons/drop_up.svg</file>
+        <file>images/icons/drop_down.svg</file>
+        <file>images/icons/drop_right.svg</file>
+        <file>images/icons/drop_left.svg</file>
     </qresource>
 </RCC>

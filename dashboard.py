@@ -380,9 +380,499 @@ class AttitudeIndicator(QWidget):
         return QSize(350, 350)  # 增大默认尺寸以适应仪表盘区域
 
 
+class SlidingControlCenter(QWidget):
+    """可滑动切换的控制中心组件"""
+
+    # 信号定义 - 自主飞行页面
+    centerClicked = pyqtSignal()  # 中央按钮点击信号 - 一键启动
+    leftClicked = pyqtSignal()    # 左侧按钮点击信号 - 开始探索
+    rightClicked = pyqtSignal()   # 右侧按钮点击信号 - 停止程序
+
+    # 信号定义 - 手动控制页面
+    manualStartClicked = pyqtSignal()    # 手动控制启动信号
+    manualTakeoffClicked = pyqtSignal()  # 手动控制起飞信号
+    manualUpClicked = pyqtSignal()       # 手动控制向上信号
+    manualDownClicked = pyqtSignal()     # 手动控制向下信号
+    manualLeftClicked = pyqtSignal()     # 手动控制向左信号
+    manualRightClicked = pyqtSignal()    # 手动控制向右信号
+
+    # 持续控制信号 - 按下和释放
+    manualUpPressed = pyqtSignal()       # 手动控制向上按下信号
+    manualUpReleased = pyqtSignal()      # 手动控制向上释放信号
+    manualDownPressed = pyqtSignal()     # 手动控制向下按下信号
+    manualDownReleased = pyqtSignal()    # 手动控制向下释放信号
+    manualLeftPressed = pyqtSignal()     # 手动控制向左按下信号
+    manualLeftReleased = pyqtSignal()    # 手动控制向左释放信号
+    manualRightPressed = pyqtSignal()    # 手动控制向右按下信号
+    manualRightReleased = pyqtSignal()   # 手动控制向右释放信号
+
+    # 页面切换信号
+    pageChanged = pyqtSignal(int)        # 页面切换信号，参数为页面索引
+
+    def __init__(self, parent=None):
+        super(SlidingControlCenter, self).__init__(parent)
+        self.current_page = 0  # 当前页面索引，0=自主飞行，1=手动控制
+        self.parent_widget = parent  # 保存父组件引用
+
+        # 滑动相关变量
+        self.start_pos = None
+        self.is_dragging = False
+        self.drag_threshold = 50  # 滑动阈值（像素）
+        self.initial_scroll_pos = 0  # 记录拖拽开始时的滚动位置
+
+        self.setupUI()
+
+    def setupUI(self):
+        """设置UI界面"""
+        # 设置组件样式，移除边框，使用与控制中心内部一致的背景
+        self.setStyleSheet("""
+            SlidingControlCenter {
+                border: none;
+                background-color: transparent;
+                border-radius: 10px;
+            }
+        """)
+
+        # 主布局
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)  # 恢复一些边距
+        main_layout.setSpacing(0)  # 减小间距
+        main_layout.setAlignment(Qt.AlignCenter)  # 确保内容居中
+
+        # 创建页面指示器
+        self.createPageIndicator()
+        main_layout.addWidget(self.page_indicator, 0, Qt.AlignCenter)
+
+        # 创建滑动容器
+        self.sliding_container = QWidget()
+        self.sliding_layout = QHBoxLayout(self.sliding_container)
+        self.sliding_layout.setContentsMargins(0, 0, 0, 0)
+        self.sliding_layout.setSpacing(0)
+
+        # 创建两个页面
+        self.createAutonomousPage()
+        self.createManualPage()
+
+        # 添加页面到滑动容器
+        self.sliding_layout.addWidget(self.autonomous_page)
+        self.sliding_layout.addWidget(self.manual_page)
+
+        # 创建滚动区域
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidget(self.sliding_container)
+        self.scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.scroll_area.setWidgetResizable(True)
+
+        # 设置滚动区域样式，移除边框
+        self.scroll_area.setStyleSheet("""
+            QScrollArea {
+                border: none;
+                background-color: transparent;
+            }
+        """)
+
+        # 禁用滚动区域的鼠标滚轮事件，让我们自己处理滑动
+        self.scroll_area.wheelEvent = lambda event: None
+
+        main_layout.addWidget(self.scroll_area)
+
+        # 设置初始页面
+        self.showPage(0)
+
+    def createPageIndicator(self):
+        """创建页面指示器"""
+        self.page_indicator = QWidget()
+        self.page_indicator.setFixedHeight(10)  # 减小高度
+        # 设置页面指示器背景透明
+        self.page_indicator.setStyleSheet("""
+            QWidget {
+                background-color: transparent;
+                border: none;
+            }
+        """)
+
+        indicator_layout = QHBoxLayout(self.page_indicator)
+        indicator_layout.setContentsMargins(0, 0, 0, 0)
+        indicator_layout.setSpacing(8)  # 减小间距
+
+        # 创建两个圆点指示器
+        self.dot1 = QLabel()
+        self.dot2 = QLabel()
+
+        # 设置圆点样式 - 减小尺寸
+        dot_style = """
+            QLabel {
+                width: 8px;
+                height: 8px;
+                border-radius: 4px;
+                background-color: #BDC3C7;
+            }
+        """
+        active_dot_style = """
+            QLabel {
+                width: 8px;
+                height: 8px;
+                border-radius: 4px;
+                background-color: #3498DB;
+            }
+        """
+
+        self.dot1.setStyleSheet(active_dot_style)  # 默认第一个激活
+        self.dot2.setStyleSheet(dot_style)
+        self.dot1.setFixedSize(8, 8)  # 减小尺寸
+        self.dot2.setFixedSize(8, 8)  # 减小尺寸
+
+        # 添加点击事件
+        self.dot1.mousePressEvent = lambda event: self.showPage(0)
+        self.dot2.mousePressEvent = lambda event: self.showPage(1)
+
+        indicator_layout.addStretch()
+        indicator_layout.addWidget(self.dot1)
+        indicator_layout.addWidget(self.dot2)
+        indicator_layout.addStretch()
+
+    def createAutonomousPage(self):
+        """创建自主飞行页面"""
+        self.autonomous_page = QWidget()
+        self.autonomous_page.setMinimumSize(300, 300)
+        self.autonomous_page.setStyleSheet("""
+            QWidget {
+                border: none;
+                background-color: transparent;
+            }
+        """)
+
+        # 这里复用原来的UIButton组件
+        if self.parent_widget and hasattr(self.parent_widget, 'screen_width'):
+            screen_width = self.parent_widget.screen_width
+        else:
+            screen_width = 1920
+
+        # 根据屏幕尺寸调整控件大小
+        if screen_width <= 1366:  # 小屏幕
+            min_size = 250
+            max_size = 400
+        elif screen_width <= 1920:  # 中等屏幕
+            min_size = 300
+            max_size = 500
+        else:  # 大屏幕
+            min_size = 350
+            max_size = 600
+
+        self.ui_button = UIButton()
+        self.ui_button.setMinimumSize(min_size, min_size)
+        self.ui_button.setMaximumSize(max_size, max_size)
+
+        # 连接信号
+        self.ui_button.centerClicked.connect(self.centerClicked.emit)
+        self.ui_button.leftClicked.connect(self.leftClicked.emit)
+        self.ui_button.rightClicked.connect(self.rightClicked.emit)
+
+        # 安装事件过滤器，让UIButton的鼠标事件也能传递给父组件
+        self.ui_button.installEventFilter(self)
+
+        # 布局
+        layout = QVBoxLayout(self.autonomous_page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setAlignment(Qt.AlignCenter)
+        layout.addWidget(self.ui_button, 0, Qt.AlignCenter)
+
+    def createManualPage(self):
+        """创建手动控制页面"""
+        self.manual_page = QWidget()
+        self.manual_page.setMinimumSize(300, 300)
+        self.manual_page.setStyleSheet("""
+            QWidget {
+                border: none;
+                background-color: transparent;
+            }
+        """)
+
+        layout = QGridLayout(self.manual_page)
+        layout.setContentsMargins(10, 10, 10, 10)
+        layout.setSpacing(5)
+        layout.setAlignment(Qt.AlignCenter)  # 确保网格布局居中
+
+        # 创建启动按钮（左上角）
+        self.start_btn = QPushButton()
+        self.start_btn.setIcon(QIcon(":/images/icons/start.svg"))
+        self.start_btn.setIconSize(QSize(32, 32))
+        self.start_btn.setFixedSize(40, 40)
+        self.start_btn.setStyleSheet("""
+            QPushButton {
+                background-color: transparent;
+                border: none;
+                border-radius: 20px;
+            }
+            QPushButton:hover {
+                background-color: rgba(39, 174, 96, 0.2);
+            }
+            QPushButton:pressed {
+                background-color: rgba(39, 174, 96, 0.4);
+            }
+        """)
+        self.start_btn.clicked.connect(self.manualStartClicked.emit)
+        self.start_btn.installEventFilter(self)  # 安装事件过滤器
+        layout.addWidget(self.start_btn, 0, 0, Qt.AlignLeft | Qt.AlignTop)
+
+        # 创建起飞按钮（右上角）
+        self.takeoff_btn = QPushButton()
+        self.takeoff_btn.setIcon(QIcon(":/images/icons/takeoff.png"))
+        self.takeoff_btn.setIconSize(QSize(32, 32))
+        self.takeoff_btn.setFixedSize(40, 40)
+        self.takeoff_btn.setStyleSheet("""
+            QPushButton {
+                background-color: transparent;
+                border: none;
+                border-radius: 20px;
+            }
+            QPushButton:hover {
+                background-color: rgba(231, 76, 60, 0.2);
+            }
+            QPushButton:pressed {
+                background-color: rgba(231, 76, 60, 0.4);
+            }
+        """)
+        self.takeoff_btn.clicked.connect(self.manualTakeoffClicked.emit)
+        self.takeoff_btn.installEventFilter(self)  # 安装事件过滤器
+        layout.addWidget(self.takeoff_btn, 0, 2, Qt.AlignRight | Qt.AlignTop)
+
+        # 创建方向控制按钮（中间区域）
+        # 向上按钮
+        self.up_btn = QPushButton()
+        self.up_btn.setIcon(QIcon(":/images/icons/drop_up.svg"))
+        self.up_btn.setIconSize(QSize(80, 80))  # 增大图标尺寸
+        self.up_btn.setFixedSize(100, 100)  # 改为100x100
+        self.up_btn.setStyleSheet(self.getDirectionButtonStyle())
+        self.up_btn.clicked.connect(self.manualUpClicked.emit)
+        self.up_btn.installEventFilter(self)  # 安装事件过滤器
+        layout.addWidget(self.up_btn, 1, 1, Qt.AlignCenter)
+
+        # 向左按钮
+        self.left_btn = QPushButton()
+        self.left_btn.setIcon(QIcon(":/images/icons/drop_left.svg"))
+        self.left_btn.setIconSize(QSize(80, 80))  # 增大图标尺寸
+        self.left_btn.setFixedSize(100, 100)  # 改为100x100
+        self.left_btn.setStyleSheet(self.getDirectionButtonStyle())
+        self.left_btn.clicked.connect(self.manualLeftClicked.emit)
+        self.left_btn.installEventFilter(self)  # 安装事件过滤器
+        layout.addWidget(self.left_btn, 2, 0, Qt.AlignCenter)
+
+        # 向右按钮
+        self.right_btn = QPushButton()
+        self.right_btn.setIcon(QIcon(":/images/icons/drop_right.svg"))
+        self.right_btn.setIconSize(QSize(80, 80))  # 增大图标尺寸
+        self.right_btn.setFixedSize(100, 100)  # 改为100x100
+        self.right_btn.setStyleSheet(self.getDirectionButtonStyle())
+        self.right_btn.clicked.connect(self.manualRightClicked.emit)
+        self.right_btn.installEventFilter(self)  # 安装事件过滤器
+        layout.addWidget(self.right_btn, 2, 2, Qt.AlignCenter)
+
+        # 向下按钮
+        self.down_btn = QPushButton()
+        self.down_btn.setIcon(QIcon(":/images/icons/drop_down.svg"))
+        self.down_btn.setIconSize(QSize(80, 80))  # 增大图标尺寸
+        self.down_btn.setFixedSize(100, 100)  # 改为100x100
+        self.down_btn.setStyleSheet(self.getDirectionButtonStyle())
+        self.down_btn.clicked.connect(self.manualDownClicked.emit)
+        self.down_btn.installEventFilter(self)  # 安装事件过滤器
+        layout.addWidget(self.down_btn, 3, 1, Qt.AlignCenter)
+
+    def getDirectionButtonStyle(self):
+        """获取方向按钮的样式"""
+        return """
+            QPushButton {
+                background-color: transparent;
+                border: none;
+                border-radius: 50px;
+            }
+            QPushButton:hover {
+                background-color: rgba(52, 152, 219, 0.2);
+            }
+            QPushButton:pressed {
+                background-color: rgba(52, 152, 219, 0.4);
+            }
+        """
+
+    def showPage(self, page_index):
+        """显示指定页面"""
+        if page_index < 0 or page_index > 1:
+            return
+
+        self.current_page = page_index
+
+        # 更新页面指示器
+        if page_index == 0:
+            self.dot1.setStyleSheet("""
+                QLabel {
+                    width: 8px;
+                    height: 8px;
+                    border-radius: 4px;
+                    background-color: #3498DB;
+                }
+            """)
+            self.dot2.setStyleSheet("""
+                QLabel {
+                    width: 8px;
+                    height: 8px;
+                    border-radius: 4px;
+                    background-color: #BDC3C7;
+                }
+            """)
+        else:
+            self.dot1.setStyleSheet("""
+                QLabel {
+                    width: 8px;
+                    height: 8px;
+                    border-radius: 4px;
+                    background-color: #BDC3C7;
+                }
+            """)
+            self.dot2.setStyleSheet("""
+                QLabel {
+                    width: 8px;
+                    height: 8px;
+                    border-radius: 4px;
+                    background-color: #3498DB;
+                }
+            """)
+
+        # 使用动画滑动到指定页面
+        if hasattr(self, 'scroll_area'):
+            page_width = self.scroll_area.width()
+            target_x = page_index * page_width
+
+            # 创建滚动动画
+            if not hasattr(self, 'scroll_animation'):
+                self.scroll_animation = QPropertyAnimation(self.scroll_area.horizontalScrollBar(), b"value")
+                self.scroll_animation.setDuration(300)  # 300ms动画时间
+                self.scroll_animation.setEasingCurve(QEasingCurve.OutCubic)
+
+            current_x = self.scroll_area.horizontalScrollBar().value()
+            self.scroll_animation.setStartValue(current_x)
+            self.scroll_animation.setEndValue(target_x)
+            self.scroll_animation.start()
+
+        # 发射页面切换信号
+        self.pageChanged.emit(page_index)
+
+    def resizeEvent(self, event):
+        """处理窗口大小变化"""
+        super(SlidingControlCenter, self).resizeEvent(event)
+        # 确保页面宽度正确
+        if hasattr(self, 'scroll_area'):
+            page_width = self.scroll_area.width()
+            self.autonomous_page.setFixedWidth(page_width)
+            self.manual_page.setFixedWidth(page_width)
+            # 重新定位到当前页面
+            target_x = self.current_page * page_width
+            self.scroll_area.horizontalScrollBar().setValue(target_x)
+
+    def mousePressEvent(self, event):
+        """鼠标按下事件"""
+        if event.button() == Qt.LeftButton:
+            self.start_pos = event.pos()
+            self.is_dragging = False
+            self.initial_scroll_pos = self.scroll_area.horizontalScrollBar().value()
+        super(SlidingControlCenter, self).mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        """鼠标移动事件"""
+        if self.start_pos is not None and (event.buttons() & Qt.LeftButton):
+            # 计算移动距离
+            delta = event.pos() - self.start_pos
+            if abs(delta.x()) > 10:  # 开始拖拽的最小距离
+                self.is_dragging = True
+
+                # 实时更新滚动位置
+                if hasattr(self, 'scroll_area'):
+                    # 直接根据拖拽距离更新滚动位置
+                    new_scroll = self.initial_scroll_pos - delta.x()
+
+                    # 限制滚动范围
+                    max_scroll = self.scroll_area.horizontalScrollBar().maximum()
+                    new_scroll = max(0, min(new_scroll, max_scroll))
+
+                    self.scroll_area.horizontalScrollBar().setValue(new_scroll)
+
+        super(SlidingControlCenter, self).mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        """鼠标释放事件"""
+        if event.button() == Qt.LeftButton and self.start_pos is not None:
+            if self.is_dragging:
+                # 计算总的滑动距离
+                total_delta = event.pos() - self.start_pos
+
+                # 获取当前滚动位置和页面宽度
+                current_scroll = self.scroll_area.horizontalScrollBar().value()
+                page_width = self.scroll_area.width()
+
+                # 计算应该显示哪一页
+                if page_width > 0:
+                    # 根据当前滚动位置判断应该切换到哪一页
+                    target_page = round(current_scroll / page_width)
+                    target_page = max(0, min(target_page, 1))  # 限制在0-1之间
+
+                    # 如果滑动距离足够大，根据滑动方向决定页面
+                    if abs(total_delta.x()) > self.drag_threshold:
+                        if total_delta.x() > 0:  # 向右滑动，显示上一页
+                            target_page = max(0, self.current_page - 1)
+                        else:  # 向左滑动，显示下一页
+                            target_page = min(1, self.current_page + 1)
+
+                    self.showPage(target_page)
+                else:
+                    # 如果无法计算页面宽度，回弹到当前页
+                    self.showPage(self.current_page)
+            else:
+                # 没有拖拽，回弹到当前页
+                self.showPage(self.current_page)
+
+            self.start_pos = None
+            self.is_dragging = False
+
+        super(SlidingControlCenter, self).mouseReleaseEvent(event)
+
+    def eventFilter(self, obj, event):
+        """事件过滤器，处理按钮的按下和释放事件，同时让鼠标事件传递给父组件进行滑动处理"""
+        # 处理方向控制按钮的按下和释放事件
+        if event.type() == QEvent.MouseButtonPress and event.button() == Qt.LeftButton:
+            if obj == self.up_btn:
+                self.manualUpPressed.emit()
+            elif obj == self.down_btn:
+                self.manualDownPressed.emit()
+            elif obj == self.left_btn:
+                self.manualLeftPressed.emit()
+            elif obj == self.right_btn:
+                self.manualRightPressed.emit()
+            # 传递给父组件处理滑动
+            self.mousePressEvent(event)
+
+        elif event.type() == QEvent.MouseButtonRelease and event.button() == Qt.LeftButton:
+            if obj == self.up_btn:
+                self.manualUpReleased.emit()
+            elif obj == self.down_btn:
+                self.manualDownReleased.emit()
+            elif obj == self.left_btn:
+                self.manualLeftReleased.emit()
+            elif obj == self.right_btn:
+                self.manualRightReleased.emit()
+            # 传递给父组件处理滑动
+            self.mouseReleaseEvent(event)
+
+        elif event.type() == QEvent.MouseMove:
+            # 传递鼠标移动事件给父组件处理滑动
+            self.mouseMoveEvent(event)
+
+        # 继续正常的事件处理
+        return super(SlidingControlCenter, self).eventFilter(obj, event)
+
+
 class UIButton(QWidget):
     """扇形控制按钮组件，用于控制中心"""
-    
+
     # 信号定义
     centerClicked = pyqtSignal()  # 中央按钮点击信号
     topClicked = pyqtSignal()     # 上方按钮点击信号

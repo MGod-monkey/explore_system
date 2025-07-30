@@ -40,16 +40,24 @@ except ImportError:
     TopicsSubscriber = None
 
 try:
-    from dashboard import UIButton
+    from dashboard import UIButton, SlidingControlCenter
 except ImportError:
     print("无法导入dashboard模块")
     UIButton = None
+    SlidingControlCenter = None
 
 try:
     from topic_logger import TopicLogger
 except ImportError:
     print("无法导入topic_logger模块")
     TopicLogger = None
+
+try:
+    from manual_controller import get_manual_controller, initialize_manual_controller
+except ImportError:
+    print("无法导入manual_controller模块")
+    get_manual_controller = None
+    initialize_manual_controller = None
 
 # Qt相关导入
 from python_qt_binding.QtGui import *
@@ -154,6 +162,7 @@ def get_config_file_path(filename):
 # 全局常量
 PROCESS_PATTERNS = [
     "sh shfiles/run.sh",
+    "sh shfiles/run_base.sh",
     "roslaunch mavros px4.launch",
     "roslaunch vins fast_drone_250.launch",
     "roslaunch onboard_detector run_detector.launch",
@@ -237,8 +246,21 @@ class MyViz(QMainWindow):
 
     # 定义信号，用于线程安全的UI更新（如果pyqtSignal可用）
     if pyqtSignal is not None:
+        # 图像更新信号
         image_update_signal = pyqtSignal()
         bird_view_update_signal = pyqtSignal()
+        
+        # 数据更新信号 - 传递数据字典
+        battery_update_signal = pyqtSignal(dict)
+        position_update_signal = pyqtSignal(dict)
+        velocity_update_signal = pyqtSignal(dict)
+        status_update_signal = pyqtSignal(dict)
+        rc_update_signal = pyqtSignal(dict)
+        camera_update_signal = pyqtSignal(dict)
+        depth_update_signal = pyqtSignal(dict)
+        bird_view_data_signal = pyqtSignal(dict)
+        marker_update_signal = pyqtSignal(dict)
+        attitude_update_signal = pyqtSignal(dict)
 
     def __init__(self):
         super(MyViz, self).__init__()
@@ -260,11 +282,99 @@ class MyViz(QMainWindow):
 
         # 连接信号到槽函数（如果信号可用）
         if pyqtSignal is not None and hasattr(self, 'image_update_signal'):
+            # 图像更新信号
             self.image_update_signal.connect(self.updateImageDisplay)
             self.bird_view_update_signal.connect(self.updateBirdViewDisplay)
+            
+            # 数据更新信号
+            self.battery_update_signal.connect(self.updateBatteryStatus)
+            self.position_update_signal.connect(self.updatePositionDisplay)
+            self.velocity_update_signal.connect(self.updateVelocityDisplay)
+            self.status_update_signal.connect(self.updateStatusDisplay)
+            self.rc_update_signal.connect(self.updateRCDisplay)
+            self.camera_update_signal.connect(self.updateCameraImage)
+            self.depth_update_signal.connect(self.updateDepthImage)
+            self.bird_view_data_signal.connect(self.updateBirdViewImage)
+            self.marker_update_signal.connect(self.marker_callback)
+            self.attitude_update_signal.connect(self.updateAttitudeDisplay)
 
         # 延迟初始化话题订阅器
         QTimer.singleShot(2000, self.setupTopicSubscriber)
+
+        # 延迟初始化手动控制器
+        QTimer.singleShot(3000, self.setupManualController)
+
+    # 线程安全的回调函数 - 通过信号发送数据而不直接操作GUI
+    def _thread_safe_battery_callback(self, battery_data):
+        """线程安全的电池状态回调"""
+        if pyqtSignal is not None and hasattr(self, 'battery_update_signal'):
+            self.battery_update_signal.emit(battery_data)
+        else:
+            # 如果信号不可用，使用QTimer在主线程中执行
+            QTimer.singleShot(0, lambda: self.updateBatteryStatus(battery_data))
+
+    def _thread_safe_position_callback(self, position_data):
+        """线程安全的位置回调"""
+        if pyqtSignal is not None and hasattr(self, 'position_update_signal'):
+            self.position_update_signal.emit(position_data)
+        else:
+            QTimer.singleShot(0, lambda: self.updatePositionDisplay(position_data))
+
+    def _thread_safe_velocity_callback(self, velocity_data):
+        """线程安全的速度回调"""
+        if pyqtSignal is not None and hasattr(self, 'velocity_update_signal'):
+            self.velocity_update_signal.emit(velocity_data)
+        else:
+            QTimer.singleShot(0, lambda: self.updateVelocityDisplay(velocity_data))
+
+    def _thread_safe_status_callback(self, status_data):
+        """线程安全的状态回调"""
+        if pyqtSignal is not None and hasattr(self, 'status_update_signal'):
+            self.status_update_signal.emit(status_data)
+        else:
+            QTimer.singleShot(0, lambda: self.updateStatusDisplay(status_data))
+
+    def _thread_safe_rc_callback(self, rc_data):
+        """线程安全的遥控器回调"""
+        if pyqtSignal is not None and hasattr(self, 'rc_update_signal'):
+            self.rc_update_signal.emit(rc_data)
+        else:
+            QTimer.singleShot(0, lambda: self.updateRCDisplay(rc_data))
+
+    def _thread_safe_camera_callback(self, camera_data):
+        """线程安全的摄像头回调"""
+        if pyqtSignal is not None and hasattr(self, 'camera_update_signal'):
+            self.camera_update_signal.emit(camera_data)
+        else:
+            QTimer.singleShot(0, lambda: self.updateCameraImage(camera_data))
+
+    def _thread_safe_depth_callback(self, depth_data):
+        """线程安全的深度图像回调"""
+        if pyqtSignal is not None and hasattr(self, 'depth_update_signal'):
+            self.depth_update_signal.emit(depth_data)
+        else:
+            QTimer.singleShot(0, lambda: self.updateDepthImage(depth_data))
+
+    def _thread_safe_bird_view_callback(self, bird_view_data):
+        """线程安全的鸟瞰图回调"""
+        if pyqtSignal is not None and hasattr(self, 'bird_view_data_signal'):
+            self.bird_view_data_signal.emit(bird_view_data)
+        else:
+            QTimer.singleShot(0, lambda: self.updateBirdViewImage(bird_view_data))
+
+    def _thread_safe_marker_callback(self, marker_data):
+        """线程安全的标记点回调"""
+        if pyqtSignal is not None and hasattr(self, 'marker_update_signal'):
+            self.marker_update_signal.emit(marker_data)
+        else:
+            QTimer.singleShot(0, lambda: self.marker_callback(marker_data))
+
+    def _thread_safe_attitude_callback(self, attitude_data):
+        """线程安全的姿态回调"""
+        if pyqtSignal is not None and hasattr(self, 'attitude_update_signal'):
+            self.attitude_update_signal.emit(attitude_data)
+        else:
+            QTimer.singleShot(0, lambda: self.updateAttitudeDisplay(attitude_data))
 
     def _init_basic_attributes(self):
         """初始化基本属性"""
@@ -296,9 +406,9 @@ class MyViz(QMainWindow):
         self.current_image_mode = "rgb"
         self.ball_screenshots = {}
 
-        # UI状态变量
-        self.sidebar_expanded = True
-        self.right_sidebar_expanded = True
+        # UI状态变量 - 启动时左右侧栏都是隐藏且未锁定状态
+        self.sidebar_expanded = False  # 左侧栏开始隐藏
+        self.right_sidebar_expanded = False  # 右侧栏开始隐藏
         self.left_sidebar_pinned = False
         self.right_sidebar_pinned = False
         self.enable_sidebar_hover = False
@@ -385,7 +495,7 @@ class MyViz(QMainWindow):
         self.sidebar_hover_timer.start(100)  # 降低频率到100ms
 
         # 延迟初始化定时器
-        QTimer.singleShot(1000, self.setupAllOverlaysAndHideSidebar)
+        QTimer.singleShot(1000, self.setupAllOverlaysAndOpenSidebars)  # 修改为打开侧栏的方法
         QTimer.singleShot(1000, self.updateImageSizes)
 
     def _main_update_cycle(self):
@@ -792,7 +902,9 @@ class MyViz(QMainWindow):
         
         # 创建左侧边栏，用于显示速度表盘和其他信息
         self.left_sidebar = QWidget()
-        self.left_sidebar.setFixedWidth(self.adaptive_left_width)  # 使用自适应宽度
+        # 初始状态设置为隐藏（宽度为0）
+        self.left_sidebar.setFixedWidth(0)
+        self.left_sidebar.setVisible(False)
         # 使用QSizePolicy允许垂直方向缩放
         self.left_sidebar.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)
         left_sidebar_layout = QVBoxLayout(self.left_sidebar)
@@ -898,8 +1010,50 @@ class MyViz(QMainWindow):
         function_container.setContentsMargins(5, 5, 5, 5)  # 减小内边距
         function_container.setSpacing(0)  # 减小组件间距
         
-        # 创建扇形控制按钮组件
-        if UIButton:
+        # 创建滑动控制中心组件
+        if SlidingControlCenter:
+            self.sliding_control_center = SlidingControlCenter(self)
+            # 根据屏幕尺寸调整控件大小
+            if self.screen_width <= 1366:  # 小屏幕
+                min_size = 300
+                max_size = 450
+            elif self.screen_width <= 1920:  # 中等屏幕
+                min_size = 350
+                max_size = 550
+            else:  # 大屏幕
+                min_size = 400
+                max_size = 650
+
+            self.sliding_control_center.setMinimumSize(min_size, min_size)
+            self.sliding_control_center.setMaximumSize(max_size, max_size)
+
+            # 连接自主飞行页面的信号
+            self.sliding_control_center.centerClicked.connect(self.startDroneSystem)  # 一键启动
+            self.sliding_control_center.leftClicked.connect(self.publishNavigationGoal)  # 开始探索
+            self.sliding_control_center.rightClicked.connect(self.stopDroneSystem)    # 停止程序
+
+            # 连接手动控制页面的信号
+            self.sliding_control_center.manualStartClicked.connect(self.onManualStart)
+            self.sliding_control_center.manualTakeoffClicked.connect(self.onManualTakeoff)
+            self.sliding_control_center.manualUpClicked.connect(self.onManualUp)
+            self.sliding_control_center.manualDownClicked.connect(self.onManualDown)
+            self.sliding_control_center.manualLeftClicked.connect(self.onManualLeft)
+            self.sliding_control_center.manualRightClicked.connect(self.onManualRight)
+
+            # 连接持续控制信号（按下和释放）
+            self.sliding_control_center.manualUpPressed.connect(self.onManualUpPressed)
+            self.sliding_control_center.manualUpReleased.connect(self.onManualUpReleased)
+            self.sliding_control_center.manualDownPressed.connect(self.onManualDownPressed)
+            self.sliding_control_center.manualDownReleased.connect(self.onManualDownReleased)
+            self.sliding_control_center.manualLeftPressed.connect(self.onManualLeftPressed)
+            self.sliding_control_center.manualLeftReleased.connect(self.onManualLeftReleased)
+            self.sliding_control_center.manualRightPressed.connect(self.onManualRightPressed)
+            self.sliding_control_center.manualRightReleased.connect(self.onManualRightReleased)
+
+            # 添加到功能区域，居中对齐
+            function_container.addWidget(self.sliding_control_center, 0, Qt.AlignCenter)
+        elif UIButton:
+            # 如果SlidingControlCenter不可用，回退到原来的UIButton
             self.ui_button = UIButton()
             # 根据屏幕尺寸调整控件大小，小屏幕使用更小的尺寸
             if self.screen_width <= 1366:  # 小屏幕
@@ -1173,7 +1327,8 @@ class MyViz(QMainWindow):
         self.toggle_sidebar_btn.setCursor(Qt.PointingHandCursor)
         
         # 当按钮被点击时触发侧边栏的显示/隐藏或固定
-        self.sidebar_expanded = True
+        # 初始状态为隐藏，按钮图标应该显示向右箭头
+        self.toggle_sidebar_btn.setIcon(QIcon(":/images/icons/dropright.svg"))
         self.toggle_sidebar_btn.clicked.connect(self.toggleLeftSidebarPinned)
         
         # 将按钮添加到布局
@@ -1235,7 +1390,8 @@ class MyViz(QMainWindow):
         self.toggle_right_sidebar_btn.setCursor(Qt.PointingHandCursor)
         
         # 当按钮被点击时触发右侧栏的显示/隐藏或固定
-        self.right_sidebar_expanded = True
+        # 初始状态为隐藏，按钮图标应该显示向左箭头
+        self.toggle_right_sidebar_btn.setIcon(QIcon(":/images/icons/dropleft.svg"))
         self.toggle_right_sidebar_btn.clicked.connect(self.toggleRightSidebarPinned)
         
         # 将按钮添加到布局
@@ -1246,7 +1402,9 @@ class MyViz(QMainWindow):
         
         # 创建右侧栏
         self.right_sidebar = QWidget()
-        self.right_sidebar.setFixedWidth(self.adaptive_right_width)  # 使用自适应宽度
+        # 初始状态设置为隐藏（宽度为0）
+        self.right_sidebar.setFixedWidth(0)
+        self.right_sidebar.setVisible(False)
         # 使右侧栏可以在垂直方向调整大小
         self.right_sidebar.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Expanding)  # 设置固定宽度策略
         right_sidebar_layout = QVBoxLayout(self.right_sidebar)
@@ -2612,8 +2770,8 @@ class MyViz(QMainWindow):
                     if pyqtSignal is not None and hasattr(self, 'image_update_signal'):
                         self.image_update_signal.emit()
                     else:
-                        # 如果信号不可用，直接调用更新
-                        self.updateImageDisplay()
+                        # 如果信号不可用，使用QTimer在主线程中执行
+                        QTimer.singleShot(0, self.updateImageDisplay)
 
         except Exception as e:
             print(f"处理图像更新时出错: {str(e)}")
@@ -3375,7 +3533,7 @@ class MyViz(QMainWindow):
             
             # 定义工作空间路径
             fast_drone_ws = os.path.expanduser("~/GUET_UAV_Drone_v2")
-            zyc_fuel_ws = os.path.expanduser("~/zyc_fuel_ws")
+            zyc_faep = os.path.expanduser("~/zyc_faep")
             
             # 后台启动第一个程序 - 使用同步执行方式
             progress_dialog.setLabelText("正在启动主系统...")
@@ -3507,7 +3665,7 @@ class MyViz(QMainWindow):
         """启动第二个进程"""
         try:
             # 定义工作空间路径
-            zyc_fuel_ws = os.path.expanduser("~/zyc_fuel_ws")
+            zyc_faep = os.path.expanduser("~/zyc_faep")
             
             # 创建位姿转换模块日志文件
             timestamp = time.strftime("%Y%m%d_%H%M%S")
@@ -3518,7 +3676,7 @@ class MyViz(QMainWindow):
             print(f"位姿转换模块日志文件: {vins_log}")
             
             # 后台启动第二个程序
-            cmd2 = f"cd {zyc_fuel_ws} && source {zyc_fuel_ws}/devel/setup.bash && rosrun vins_to_mavros vins_to_mavros_node"
+            cmd2 = f"cd {zyc_faep} && source {zyc_faep}/devel/setup.bash && rosrun vins_to_mavros vins_to_mavros_node"
             with open(vins_log, 'w') as log_file:
                 process2 = subprocess.Popen(cmd2, shell=True, stdout=log_file, stderr=log_file, 
                                         executable='/bin/bash', text=True)
@@ -3567,7 +3725,7 @@ class MyViz(QMainWindow):
         """启动第三个进程"""
         try:
             # 定义工作空间路径
-            zyc_fuel_ws = os.path.expanduser("~/zyc_fuel_ws")
+            zyc_faep = os.path.expanduser("~/zyc_faep")
             
             # 创建坐标转换模块日志文件
             timestamp = time.strftime("%Y%m%d_%H%M%S")
@@ -3578,7 +3736,7 @@ class MyViz(QMainWindow):
             print(f"坐标转换模块日志文件: {pose_to_odom_log}")
             
             # 后台启动第三个程序
-            cmd3 = f"cd {zyc_fuel_ws} && source {zyc_fuel_ws}/devel/setup.bash && rosrun pose_to_odom_converter pose_to_odom_converter_node"
+            cmd3 = f"cd {zyc_faep} && source {zyc_faep}/devel/setup.bash && rosrun pose_to_odom_converter pose_to_odom_converter_node"
             with open(pose_to_odom_log, 'w') as log_file:
                 process3 = subprocess.Popen(cmd3, shell=True, stdout=log_file, stderr=log_file, 
                                         executable='/bin/bash', text=True)
@@ -3688,28 +3846,49 @@ class MyViz(QMainWindow):
             # 创建新的订阅器
             self.topic_subscriber = TopicsSubscriber()
             
-            # 注册回调函数
-            self.topic_subscriber.register_callback("battery", self.updateBatteryStatus)
-            self.topic_subscriber.register_callback("odometry", self.updatePositionDisplay)
-            self.topic_subscriber.register_callback("velocity", self.updateVelocityDisplay)
-            self.topic_subscriber.register_callback("status", self.updateStatusDisplay)
-            self.topic_subscriber.register_callback("rc_input", self.updateRCDisplay)
-            self.topic_subscriber.register_callback("camera", self.updateCameraImage)
-            self.topic_subscriber.register_callback("depth", self.updateDepthImage)
-            self.topic_subscriber.register_callback("bird_view", self.updateBirdViewImage)
-            self.topic_subscriber.register_callback("marker", self.marker_callback)
-            self.topic_subscriber.register_callback("attitude", self.updateAttitudeDisplay)
+            # 注册线程安全的回调函数
+            self.topic_subscriber.register_callback("battery", self._thread_safe_battery_callback)
+            self.topic_subscriber.register_callback("odometry", self._thread_safe_position_callback)
+            self.topic_subscriber.register_callback("velocity", self._thread_safe_velocity_callback)
+            self.topic_subscriber.register_callback("status", self._thread_safe_status_callback)
+            self.topic_subscriber.register_callback("rc_input", self._thread_safe_rc_callback)
+            self.topic_subscriber.register_callback("camera", self._thread_safe_camera_callback)
+            self.topic_subscriber.register_callback("depth", self._thread_safe_depth_callback)
+            self.topic_subscriber.register_callback("bird_view", self._thread_safe_bird_view_callback)
+            self.topic_subscriber.register_callback("marker", self._thread_safe_marker_callback)
+            self.topic_subscriber.register_callback("attitude", self._thread_safe_attitude_callback)
             
             # 注意：已移除MAVROS话题回调，使用普通话题替代
             
             print("话题订阅器已启动，将在后台自动连接可用话题...")
+            print("注意：已启用线程安全的GUI更新机制，防止段错误")
             return True
         except Exception as e:
             print(f"初始化话题订阅器失败: {str(e)}")
             self.topic_subscriber = None
             return False
-            
 
+    def setupManualController(self):
+        """初始化手动控制器"""
+        try:
+            if initialize_manual_controller and get_manual_controller:
+                # 初始化手动控制器
+                if initialize_manual_controller():
+                    self.manual_controller = get_manual_controller()
+                    print("手动控制器已成功初始化")
+                    return True
+                else:
+                    print("手动控制器初始化失败")
+                    self.manual_controller = None
+                    return False
+            else:
+                print("手动控制器模块未正确导入")
+                self.manual_controller = None
+                return False
+        except Exception as e:
+            print(f"初始化手动控制器时出错: {str(e)}")
+            self.manual_controller = None
+            return False
 
     def showOdomLog(self):
         """显示odom话题的日志"""
@@ -3840,7 +4019,7 @@ class MyViz(QMainWindow):
             QApplication.processEvents()
             
             # 定义工作空间路径
-            zyc_fuel_ws = os.path.expanduser("~/zyc_fuel_ws")
+            zyc_faep = os.path.expanduser("~/zyc_faep")
             shiyan_catkin_ws_target = os.path.expanduser("~/shiyan_catkin_ws_target")
 
             # 更新进度
@@ -3854,7 +4033,7 @@ class MyViz(QMainWindow):
             print(f"探索管理器日志文件: {exploration_log}")
 
             # 启动探索管理器（后台运行，输出重定向到日志文件）
-            cmd1 = f"cd {zyc_fuel_ws} && source devel/setup.bash && roslaunch exploration_manager exploration.launch"
+            cmd1 = f"cd {zyc_faep} && source devel/setup.bash && roslaunch exploration_manager exploration.launch"
             with open(exploration_log, 'w') as log_file:
                 exploration_process = subprocess.Popen(cmd1, shell=True, stdout=log_file, stderr=log_file, executable='/bin/bash')
             
@@ -3971,20 +4150,20 @@ class MyViz(QMainWindow):
             print(f"小球位置跟踪脚本已启动，PID: {ball_tracker_process.pid}")
 
             # 更新进度
-            # progress_dialog.setValue(90)
-            # progress_dialog.setLabelText("启动导航系统...")
-            # QApplication.processEvents()
-            # time.sleep(2)  # 等待2秒
+            progress_dialog.setValue(90)
+            progress_dialog.setLabelText("启动导航系统...")
+            QApplication.processEvents()
+            time.sleep(2)  # 等待2秒
 
-            # # 创建导航系统日志文件
-            # nav_log = f"{log_dir}/fuel_nav_{timestamp}.log"
-            # self.log_files["fuel_nav"] = nav_log
-            # print(f"导航系统日志文件: {nav_log}")
+            # 创建导航系统日志文件
+            nav_log = f"{log_dir}/fuel_nav_{timestamp}.log"
+            self.log_files["fuel_nav"] = nav_log
+            print(f"导航系统日志文件: {nav_log}")
 
-            # # 启动导航系统（后台运行，输出重定向到日志文件）
-            # cmd5 = f"cd {zyc_fuel_ws} && source devel/setup.bash && rosrun exploration_manager fuel_nav"
-            # with open(nav_log, 'w') as log_file:
-            #     nav_process = subprocess.Popen(cmd5, shell=True, stdout=log_file, stderr=log_file, executable='/bin/bash')
+            # 启动导航系统（后台运行，输出重定向到日志文件）
+            cmd5 = f"cd {zyc_faep} && source devel/setup.bash && rosrun exploration_manager fuel_nav"
+            with open(nav_log, 'w') as log_file:
+                nav_process = subprocess.Popen(cmd5, shell=True, stdout=log_file, stderr=log_file, executable='/bin/bash')
             
             # 更新进度到100%
             progress_dialog.setValue(100)
@@ -5018,7 +5197,260 @@ class MyViz(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "发布错误", f"发布导航目标点时出错: {str(e)}")
 
+    # 手动控制回调函数
+    def onManualStart(self):
+        """手动控制启动按钮回调 - 启动基础程序"""
+        try:
+            print("手动控制：启动按钮被点击")
 
+            # 创建日志目录
+            log_dir = get_data_directory("log")
+            timestamp = time.strftime("%Y%m%d_%H%M%S")
+
+            # 显示正在启动的消息
+            progress_dialog = QProgressDialog("正在启动基础系统，请稍候...", "取消", 0, 100, self)
+            progress_dialog.setWindowTitle("基础系统启动")
+            progress_dialog.setWindowModality(Qt.WindowModal)
+            progress_dialog.setCancelButton(None)  # 禁用取消按钮
+            progress_dialog.setValue(0)
+            progress_dialog.show()
+            QApplication.processEvents()
+
+            # 定义工作空间路径
+            fast_drone_ws = os.path.expanduser("~/GUET_UAV_Drone_v2")
+
+            # 启动基础程序
+            progress_dialog.setLabelText("正在启动基础系统...")
+            progress_dialog.setValue(20)
+            QApplication.processEvents()
+
+            # 创建日志文件
+            base_system_log = f"{log_dir}/base_system_{timestamp}.log"
+            if not hasattr(self, 'log_files'):
+                self.log_files = {}
+            self.log_files["base_system"] = base_system_log
+            print(f"基础系统日志文件: {base_system_log}")
+
+            # 修改命令使用run_base.sh
+            cmd1 = f"cd {fast_drone_ws} && source {fast_drone_ws}/devel/setup.bash && sh shfiles/run_base.sh"
+            with open(base_system_log, 'w') as log_file:
+                process = subprocess.Popen(cmd1, shell=True, stdout=log_file, stderr=log_file,
+                                        executable='/bin/bash', text=True)
+
+            # 等待25秒，确保基础节点启动完成
+            timeout = 25
+            start_time = time.time()
+
+            # 非阻塞方式检查进程是否已结束
+            while time.time() - start_time < timeout:
+                returncode = process.poll()
+                if returncode is not None:  # 进程已结束
+                    if returncode != 0:
+                        # 获取错误输出
+                        _, stderr = process.communicate()
+                        error_msg = f"启动基础系统失败，返回代码: {returncode}\n\n错误信息:\n{stderr[:500]}..."
+                        QMessageBox.critical(self, "启动错误", error_msg)
+                        progress_dialog.close()
+                        return
+                    break
+
+                # 更新进度条
+                elapsed = time.time() - start_time
+                progress = int(20 + min(60, (elapsed / timeout * 60)))
+                progress_dialog.setValue(progress)
+
+                # 显示剩余等待时间
+                remaining = max(0, int(timeout - elapsed))
+                progress_dialog.setLabelText(f"正在启动基础系统...（还需等待约{remaining}秒）")
+
+                QApplication.processEvents()
+                time.sleep(0.5)
+
+            progress_dialog.setValue(100)
+            progress_dialog.setLabelText("基础系统启动完成！")
+            QApplication.processEvents()
+            time.sleep(1)
+            progress_dialog.close()
+
+            print("基础系统启动完成")
+            QMessageBox.information(self, "启动成功", "基础系统已成功启动！")
+
+        except Exception as e:
+            QMessageBox.critical(self, "启动错误", f"启动基础系统时出错: {str(e)}")
+            print(f"手动控制启动错误: {str(e)}")
+
+    def onManualTakeoff(self):
+        """手动控制起飞按钮回调 - 发布起飞命令"""
+        try:
+            print("手动控制：起飞按钮被点击")
+
+            # 发布起飞命令
+            takeoff_cmd = "rostopic pub -1 /px4ctrl/takeoff_land quadrotor_msgs/TakeoffLand \"takeoff_land_cmd: 1\""
+
+            # 显示正在执行的消息
+            progress_dialog = QProgressDialog("正在发送起飞命令...", None, 0, 100, self)
+            progress_dialog.setWindowTitle("起飞命令")
+            progress_dialog.setWindowModality(Qt.WindowModal)
+            progress_dialog.setCancelButton(None)
+            progress_dialog.setValue(50)
+            progress_dialog.show()
+            QApplication.processEvents()
+
+            # 执行起飞命令
+            result = subprocess.run(takeoff_cmd, shell=True, capture_output=True, text=True, timeout=10)
+
+            progress_dialog.setValue(100)
+            QApplication.processEvents()
+            time.sleep(0.5)
+            progress_dialog.close()
+
+            if result.returncode == 0:
+                print("起飞命令发送成功")
+                QMessageBox.information(self, "起飞命令", "起飞命令已成功发送！")
+            else:
+                error_msg = f"起飞命令发送失败\n返回代码: {result.returncode}\n错误信息: {result.stderr}"
+                print(f"起飞命令失败: {error_msg}")
+                QMessageBox.warning(self, "起飞命令失败", error_msg)
+
+        except subprocess.TimeoutExpired:
+            QMessageBox.warning(self, "超时错误", "起飞命令执行超时，请检查ROS环境是否正常")
+            print("起飞命令执行超时")
+        except Exception as e:
+            QMessageBox.critical(self, "起飞错误", f"发送起飞命令时出错: {str(e)}")
+            print(f"手动控制起飞错误: {str(e)}")
+
+    def onManualUp(self):
+        """手动控制向上按钮回调 - 前进"""
+        try:
+            print("手动控制：向上按钮被点击 - 前进")
+            if hasattr(self, 'manual_controller') and self.manual_controller:
+                self.manual_controller.execute_single_command('forward', 0.5)
+            else:
+                print("手动控制器未初始化")
+        except Exception as e:
+            print(f"手动控制前进错误: {str(e)}")
+
+    def onManualDown(self):
+        """手动控制向下按钮回调 - 后退"""
+        try:
+            print("手动控制：向下按钮被点击 - 后退")
+            if hasattr(self, 'manual_controller') and self.manual_controller:
+                self.manual_controller.execute_single_command('backward', 0.5)
+            else:
+                print("手动控制器未初始化")
+        except Exception as e:
+            print(f"手动控制后退错误: {str(e)}")
+
+    def onManualLeft(self):
+        """手动控制向左按钮回调 - 左移"""
+        try:
+            print("手动控制：向左按钮被点击 - 左移")
+            if hasattr(self, 'manual_controller') and self.manual_controller:
+                self.manual_controller.execute_single_command('left', 0.5)
+            else:
+                print("手动控制器未初始化")
+        except Exception as e:
+            print(f"手动控制左移错误: {str(e)}")
+
+    def onManualRight(self):
+        """手动控制向右按钮回调 - 右移"""
+        try:
+            print("手动控制：向右按钮被点击 - 右移")
+            if hasattr(self, 'manual_controller') and self.manual_controller:
+                self.manual_controller.execute_single_command('right', 0.5)
+            else:
+                print("手动控制器未初始化")
+        except Exception as e:
+            print(f"手动控制右移错误: {str(e)}")
+
+    # 持续控制回调函数 - 按下事件
+    def onManualUpPressed(self):
+        """手动控制向上按钮按下 - 开始前进"""
+        try:
+            print("手动控制：向上按钮按下 - 开始前进")
+            if hasattr(self, 'manual_controller') and self.manual_controller:
+                self.manual_controller.start_continuous_command('forward')
+            else:
+                print("手动控制器未初始化")
+        except Exception as e:
+            print(f"手动控制开始前进错误: {str(e)}")
+
+    def onManualUpReleased(self):
+        """手动控制向上按钮释放 - 停止前进"""
+        try:
+            print("手动控制：向上按钮释放 - 停止前进")
+            if hasattr(self, 'manual_controller') and self.manual_controller:
+                self.manual_controller.stop_continuous_command('forward')
+            else:
+                print("手动控制器未初始化")
+        except Exception as e:
+            print(f"手动控制停止前进错误: {str(e)}")
+
+    def onManualDownPressed(self):
+        """手动控制向下按钮按下 - 开始后退"""
+        try:
+            print("手动控制：向下按钮按下 - 开始后退")
+            if hasattr(self, 'manual_controller') and self.manual_controller:
+                self.manual_controller.start_continuous_command('backward')
+            else:
+                print("手动控制器未初始化")
+        except Exception as e:
+            print(f"手动控制开始后退错误: {str(e)}")
+
+    def onManualDownReleased(self):
+        """手动控制向下按钮释放 - 停止后退"""
+        try:
+            print("手动控制：向下按钮释放 - 停止后退")
+            if hasattr(self, 'manual_controller') and self.manual_controller:
+                self.manual_controller.stop_continuous_command('backward')
+            else:
+                print("手动控制器未初始化")
+        except Exception as e:
+            print(f"手动控制停止后退错误: {str(e)}")
+
+    def onManualLeftPressed(self):
+        """手动控制向左按钮按下 - 开始左移"""
+        try:
+            print("手动控制：向左按钮按下 - 开始左移")
+            if hasattr(self, 'manual_controller') and self.manual_controller:
+                self.manual_controller.start_continuous_command('left')
+            else:
+                print("手动控制器未初始化")
+        except Exception as e:
+            print(f"手动控制开始左移错误: {str(e)}")
+
+    def onManualLeftReleased(self):
+        """手动控制向左按钮释放 - 停止左移"""
+        try:
+            print("手动控制：向左按钮释放 - 停止左移")
+            if hasattr(self, 'manual_controller') and self.manual_controller:
+                self.manual_controller.stop_continuous_command('left')
+            else:
+                print("手动控制器未初始化")
+        except Exception as e:
+            print(f"手动控制停止左移错误: {str(e)}")
+
+    def onManualRightPressed(self):
+        """手动控制向右按钮按下 - 开始右移"""
+        try:
+            print("手动控制：向右按钮按下 - 开始右移")
+            if hasattr(self, 'manual_controller') and self.manual_controller:
+                self.manual_controller.start_continuous_command('right')
+            else:
+                print("手动控制器未初始化")
+        except Exception as e:
+            print(f"手动控制开始右移错误: {str(e)}")
+
+    def onManualRightReleased(self):
+        """手动控制向右按钮释放 - 停止右移"""
+        try:
+            print("手动控制：向右按钮释放 - 停止右移")
+            if hasattr(self, 'manual_controller') and self.manual_controller:
+                self.manual_controller.stop_continuous_command('right')
+            else:
+                print("手动控制器未初始化")
+        except Exception as e:
+            print(f"手动控制停止右移错误: {str(e)}")
 
     def setupRVizOverlay(self):
         """创建悬浮在RViz上方的信息面板 - 独立窗口，但跟随RViz框架移动"""
@@ -5556,6 +5988,14 @@ class MyViz(QMainWindow):
         # 延迟500ms后隐藏左右侧栏，确保悬浮窗口已完全显示
         QTimer.singleShot(500, self.finalizeStartup)
     
+    def setupAllOverlaysAndOpenSidebars(self):
+        """设置所有悬浮窗口并在完成后打开并锁定左右侧栏"""
+        # 先设置所有悬浮窗口
+        self.setupAllOverlays()
+        
+        # 延迟500ms后打开并锁定左右侧栏，确保悬浮窗口已完全显示
+        QTimer.singleShot(500, self.startupOpenAndLockSidebars)
+    
     def finalizeStartup(self):
         """完成启动过程，隐藏左右侧栏并启用鼠标跟踪"""
         # 隐藏左侧栏和右侧栏
@@ -5599,10 +6039,68 @@ class MyViz(QMainWindow):
         # 延迟300ms后启用鼠标跟踪，避免动画过程中触发鼠标跟踪
         QTimer.singleShot(300, self.enableMouseTracking)
     
+    def startupOpenAndLockSidebars(self):
+        """启动时打开并锁定左右侧栏"""
+        print("开始启动侧栏打开动画...")
+        
+        # 确保侧栏开始时是隐藏状态
+        self.sidebar_expanded = False
+        self.right_sidebar_expanded = False
+        
+        # 先打开左侧栏（带动画）
+        self.toggleSidebar(hide=False, animate=True)
+        
+        # 延迟200ms后打开右侧栏（错开动画时间以避免同时动画）
+        QTimer.singleShot(200, lambda: self.toggleRightSidebar(hide=False, animate=True))
+        
+        # 延迟600ms后设置锁定状态（等待动画完成）
+        QTimer.singleShot(600, self.lockSidebarsAfterOpen)
+    
+    def lockSidebarsAfterOpen(self):
+        """在侧栏打开后设置锁定状态"""
+        print("锁定左右侧栏...")
+        
+        # 设置左侧栏为锁定状态
+        self.left_sidebar_pinned = True
+        self.toggle_sidebar_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #3498DB;  /* 蓝色背景表示已固定 */
+                border: none;
+                border-radius: 0;
+                padding: 2px;
+            }
+            QPushButton:hover {
+                background-color: #2980B9;
+            }
+            QPushButton:pressed {
+                background-color: #2980B9;
+            }
+        """)
+        
+        # 设置右侧栏为锁定状态
+        self.right_sidebar_pinned = True
+        self.toggle_right_sidebar_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #3498DB;  /* 蓝色背景表示已固定 */
+                border: none;
+                border-radius: 0;
+                padding: 2px;
+            }
+            QPushButton:hover {
+                background-color: #2980B9;
+            }
+            QPushButton:pressed {
+                background-color: #2980B9;
+            }
+        """)
+        
+        # 延迟100ms后启用鼠标跟踪
+        QTimer.singleShot(100, self.enableMouseTracking)
+    
     def enableMouseTracking(self):
         """启用鼠标跟踪"""
         self.enable_sidebar_hover = True
-        print("鼠标跟踪已启用")
+        print("鼠标跟踪已启用，左右侧栏已锁定并打开")
 
     def on_position_table_cell_clicked(self, row, column):
         """处理位置表格单元格点击事件"""
