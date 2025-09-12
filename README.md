@@ -171,16 +171,3 @@ python3 build_executable.py
 ## 🤝 贡献
 
 欢迎提交 Issue 和 Pull Request！
-
-## 📞 支持
-
-如果遇到问题，请：
-1. 查看 [故障排除](#故障排除) 部分
-2. 检查系统日志文件
-3. 提交 Issue 描述问题
-
----
-
-**版本**: v1.0  
-**更新日期**: 2024年  
-**兼容性**: Ubuntu 20.04 + ROS Noetic
