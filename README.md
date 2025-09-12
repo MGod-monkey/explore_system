@@ -4,6 +4,12 @@
 
 ## 📺 演示视频
 
+### 无人机动静态障碍物规避
+
+https://github.com/user-attachments/assets/80bd5307-e49a-4b9f-a653-79bdc4324bec
+
+### 完整自主搜索系统流程展示
+
 https://github.com/user-attachments/assets/90228ca9-0f2d-461a-ae5d-ae7e6a1f474c
 
 ## ✨ 主要功能
