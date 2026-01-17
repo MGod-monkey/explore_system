@@ -53,6 +53,12 @@ except ImportError:
     TopicLogger = None
 
 try:
+    from waypoint_dialog import WaypointDialog
+except ImportError:
+    print("无法导入waypoint_dialog模块")
+    WaypointDialog = None
+
+try:
     from manual_controller import get_manual_controller, initialize_manual_controller
 except ImportError:
     print("无法导入manual_controller模块")
@@ -161,21 +167,10 @@ def get_config_file_path(filename):
 
 # 全局常量
 PROCESS_PATTERNS = [
-    "sh shfiles/run.sh",
-    "sh shfiles/run_base.sh",
-    "roslaunch mavros px4.launch",
-    "roslaunch vins fast_drone_250.launch",
-    "roslaunch onboard_detector run_detector.launch",
-    "roslaunch px4ctrl run_ctrl.launch",
-    "roslaunch ego_planner single_run_in_exp.launch",
-    "roslaunch realsense2_camera rs_camera.launch",
-    "vins_to_mavros_node",
-    "pose_to_odom_converter_node",
-    "roslaunch exploration_manager exploration.launch",
-    "roslaunch yolo_detector yolo_ros.launch",
-    "roslaunch sort_ros sort_ros.launch",
-    "python3 ball_pose_tracker.py",
-    "rosrun exploration_manager fuel_nav"
+    "roslaunch px4ctrl run_node.launch",
+    "rqt_reconfigure",
+    "roslaunch dynamic_predictor predictor_with_fake_detector.launch",
+    "roslaunch ego_planner single_run_in_gazebo.launch",
 ]
 
 # 全局样式常量
@@ -242,7 +237,7 @@ GLOBAL_STYLES = {
 }
 
 class MyViz(QMainWindow):
-    """无人机自主搜索系统主窗口类"""
+    """无人机自主导航系统主窗口类"""
 
     # 定义信号，用于线程安全的UI更新（如果pyqtSignal可用）
     if pyqtSignal is not None:
@@ -436,7 +431,7 @@ class MyViz(QMainWindow):
 
         # 设置图标和标题
         self.setWindowIcon(QIcon("logo.png"))
-        self.setWindowTitle("无人机自主搜索系统")
+        self.setWindowTitle("无人机自主导航系统")
 
         # 创建中央控件
         self.central_widget = QWidget()
@@ -789,7 +784,7 @@ class MyViz(QMainWindow):
         header_layout.setSpacing(2)
         
         # 创建标题标签
-        title_label = QLabel("无人机自主搜索系统")
+        title_label = QLabel("无人机自主导航系统")
         title_label.setStyleSheet("font-size: 24pt; color: #3498DB; padding: 10px; font-weight: bold;")
         title_label.setAlignment(Qt.AlignCenter)
         title_label.setMinimumWidth(500)  # 设置最小宽度
@@ -1029,8 +1024,10 @@ class MyViz(QMainWindow):
 
             # 连接自主飞行页面的信号
             self.sliding_control_center.centerClicked.connect(self.startDroneSystem)  # 一键启动
-            self.sliding_control_center.leftClicked.connect(self.publishNavigationGoal)  # 开始探索
+            self.sliding_control_center.leftClicked.connect(self.publishNavigationGoal)  # 前往目标
             self.sliding_control_center.rightClicked.connect(self.stopDroneSystem)    # 停止程序
+            self.sliding_control_center.topClicked.connect(self.returnToHome)         # 一键返航
+            self.sliding_control_center.bottomClicked.connect(self.importPointCloud)  # 导入点云（待实现）
 
             # 连接手动控制页面的信号
             self.sliding_control_center.manualStartClicked.connect(self.onManualStart)
@@ -1071,7 +1068,7 @@ class MyViz(QMainWindow):
             # 连接信号到对应的槽函数
             self.ui_button.centerClicked.connect(self.startDroneSystem)  # 中间按钮 - 一键启动
             # self.ui_button.topClicked.connect(self.onTopButtonClick)     # 顶部按钮 - 一键返航
-            self.ui_button.leftClicked.connect(self.publishNavigationGoal)  # 左侧按钮 - 开始探索
+            self.ui_button.leftClicked.connect(self.publishNavigationGoal)  # 左侧按钮 - 开始导航
             self.ui_button.rightClicked.connect(self.stopDroneSystem)    # 右侧按钮 - 停止程序
             # 底部按钮暂时不连接功能
 
@@ -1116,7 +1113,7 @@ class MyViz(QMainWindow):
             
             function_layout.addWidget(return_home_btn, 0, 1)
             
-            # 创建左侧按钮 - 开始探索 - 文字竖向排列
+            # 创建左侧按钮 - 开始导航 - 文字竖向排列
             explore_btn = QPushButton()
             explore_btn.setCursor(Qt.PointingHandCursor)  # 设置鼠标悬停时的光标为手型
             explore_btn.setStyleSheet("""
@@ -1153,7 +1150,7 @@ class MyViz(QMainWindow):
             explore_layout.setContentsMargins(5, 5, 5, 5)
             explore_layout.addWidget(explore_label, 0, Qt.AlignCenter)
             
-            # 连接开始探索按钮的点击事件
+            # 连接开始导航按钮的点击事件
             explore_btn.clicked.connect(self.publishNavigationGoal)
             
             function_layout.addWidget(explore_btn, 1, 0)
@@ -3516,14 +3513,14 @@ class MyViz(QMainWindow):
             self.log_button.setChecked(False)
 
     def startDroneSystem(self):
-        """启动无人机系统"""
+        """启动无人机导航系统"""
         try:
             # 创建日志目录 - 使用新的路径工具函数
             log_dir = get_data_directory("log")
             timestamp = time.strftime("%Y%m%d_%H%M%S")
             
             # 显示正在启动的消息
-            progress_dialog = QProgressDialog("正在启动无人机系统，请稍候...", "取消", 0, 100, self)
+            progress_dialog = QProgressDialog("正在启动无人机导航系统，请稍候...", "取消", 0, 100, self)
             progress_dialog.setWindowTitle("系统启动")
             progress_dialog.setWindowModality(Qt.WindowModal)
             progress_dialog.setCancelButton(None)  # 禁用取消按钮
@@ -3532,72 +3529,111 @@ class MyViz(QMainWindow):
             QApplication.processEvents()
             
             # 定义工作空间路径
-            fast_drone_ws = os.path.expanduser("~/GUET_UAV_Drone_v2")
-            zyc_faep = os.path.expanduser("~/zyc_faep")
+            catkin_ws = os.path.expanduser("~/catkin_ws_dyn")
             
-            # 后台启动第一个程序 - 使用同步执行方式
-            progress_dialog.setLabelText("正在启动主系统...")
+            # 初始化日志文件字典
+            self.log_files = {}
+            
+            # ===== 步骤1: 启动 px4ctrl =====
+            progress_dialog.setLabelText("正在启动 px4ctrl...")
             progress_dialog.setValue(10)
             QApplication.processEvents()
             
-            # 创建日志文件
-            main_system_log = f"{log_dir}/main_system_{timestamp}.log"
-            self.log_files = {"main_system": main_system_log}
-            print(f"主系统日志文件: {main_system_log}")
+            px4ctrl_log = f"{log_dir}/px4ctrl_{timestamp}.log"
+            self.log_files["px4ctrl"] = px4ctrl_log
+            print(f"px4ctrl 日志文件: {px4ctrl_log}")
             
-            cmd1 = f"cd {fast_drone_ws} && source {fast_drone_ws}/devel/setup.bash && sh shfiles/run.sh"
-            with open(main_system_log, 'w') as log_file:
-                process = subprocess.Popen(cmd1, shell=True, stdout=log_file, stderr=log_file, 
+            cmd1 = f"cd {catkin_ws} && source {catkin_ws}/devel/setup.bash && roslaunch px4ctrl run_node.launch"
+            with open(px4ctrl_log, 'w') as log_file:
+                px4ctrl_process = subprocess.Popen(cmd1, shell=True, stdout=log_file, stderr=log_file, 
                                         executable='/bin/bash', text=True)
+            self.processes["px4ctrl"] = px4ctrl_process
             
-            # 等待25秒，确保所有节点启动完成
-            timeout = 25  # 增加到25秒等待，与run.sh中的累计睡眠时间一致
-            start_time = time.time()
-            
-            # 非阻塞方式检查进程是否已结束
-            while time.time() - start_time < timeout:
-                returncode = process.poll()
-                if returncode is not None:  # 进程已结束
-                    if returncode != 0:
-                        # 获取错误输出
-                        _, stderr = process.communicate()
-                        error_msg = f"启动无人机系统失败，返回代码: {returncode}\n\n错误信息:\n{stderr[:500]}..."
-                        QMessageBox.critical(self, "启动错误", error_msg)
-                        progress_dialog.close()
-                        return
-                    break
-                    
-                # 更新进度条 - 在25秒内从10%逐步增加到50%
-                elapsed = time.time() - start_time
-                progress = int(10 + min(25, (elapsed / timeout * 25)))
-                progress_dialog.setValue(progress)
-                
-                # 显示更有用的信息，包括剩余等待时间
-                remaining = max(0, int(timeout - elapsed))
-                progress_dialog.setLabelText(f"正在启动主系统...（还需等待约{remaining}秒）")
-                
+            # 等待5秒
+            for i in range(5):
+                progress_dialog.setLabelText(f"正在启动 px4ctrl...（等待 {5-i} 秒）")
+                progress_dialog.setValue(10 + i * 4)
                 QApplication.processEvents()
-                time.sleep(0.5)  # 增加sleep间隔，减少UI更新频率
+                time.sleep(1)
             
-            # 无论脚本是否返回，都继续执行（run.sh是以后台方式运行各个节点的）
-            print("已启动run.sh脚本，将等待其后台完成各节点启动")
-            
-            # 设置一个定时器检查进程是否在后续运行中出错
-            self.check_process_timer = QTimer()
-            self.check_process_timer.timeout.connect(lambda: self.checkProcessStatus(process, "主系统"))
-            self.check_process_timer.start(5000)  # 每5秒检查一次
-            
-            # 继续执行，第一个脚本已经正常启动
-            progress_dialog.setValue(50)
-            progress_dialog.setLabelText("启动位姿转换模块...")
+            # ===== 步骤2: 启动 rqt_reconfigure =====
+            progress_dialog.setLabelText("正在启动 rqt_reconfigure...")
+            progress_dialog.setValue(30)
             QApplication.processEvents()
             
-            # 延迟启动第二个进程 - 给run.sh额外的1秒时间完成启动
-            QTimer.singleShot(1000, lambda: self.startSecondProcess(progress_dialog))
+            rqt_log = f"{log_dir}/rqt_reconfigure_{timestamp}.log"
+            self.log_files["rqt_reconfigure"] = rqt_log
+            print(f"rqt_reconfigure 日志文件: {rqt_log}")
+            
+            cmd2 = f"source {catkin_ws}/devel/setup.bash && rosrun rqt_reconfigure rqt_reconfigure"
+            with open(rqt_log, 'w') as log_file:
+                rqt_process = subprocess.Popen(cmd2, shell=True, stdout=log_file, stderr=log_file, 
+                                        executable='/bin/bash', text=True)
+            self.processes["rqt_reconfigure"] = rqt_process
+            
+            # 等待5秒
+            for i in range(5):
+                progress_dialog.setLabelText(f"正在启动 rqt_reconfigure...（等待 {5-i} 秒）")
+                progress_dialog.setValue(30 + i * 4)
+                QApplication.processEvents()
+                time.sleep(1)
+            
+            # ===== 步骤3: 启动 dynamic_predictor =====
+            progress_dialog.setLabelText("正在启动 dynamic_predictor...")
+            progress_dialog.setValue(50)
+            QApplication.processEvents()
+            
+            predictor_log = f"{log_dir}/dynamic_predictor_{timestamp}.log"
+            self.log_files["dynamic_predictor"] = predictor_log
+            print(f"dynamic_predictor 日志文件: {predictor_log}")
+            
+            cmd3 = f"cd {catkin_ws} && source {catkin_ws}/devel/setup.bash && roslaunch dynamic_predictor predictor_with_fake_detector.launch"
+            with open(predictor_log, 'w') as log_file:
+                predictor_process = subprocess.Popen(cmd3, shell=True, stdout=log_file, stderr=log_file, 
+                                        executable='/bin/bash', text=True)
+            self.processes["dynamic_predictor"] = predictor_process
+            
+            # 等待10秒
+            for i in range(10):
+                progress_dialog.setLabelText(f"正在启动 dynamic_predictor...（等待 {10-i} 秒）")
+                progress_dialog.setValue(50 + i * 3)
+                QApplication.processEvents()
+                time.sleep(1)
+            
+            # ===== 步骤4: 启动 ego_planner =====
+            progress_dialog.setLabelText("正在启动 ego_planner...")
+            progress_dialog.setValue(80)
+            QApplication.processEvents()
+            
+            planner_log = f"{log_dir}/ego_planner_{timestamp}.log"
+            self.log_files["ego_planner"] = planner_log
+            print(f"ego_planner 日志文件: {planner_log}")
+            
+            cmd4 = f"cd {catkin_ws} && source {catkin_ws}/devel/setup.bash && roslaunch ego_planner single_run_in_gazebo.launch"
+            with open(planner_log, 'w') as log_file:
+                planner_process = subprocess.Popen(cmd4, shell=True, stdout=log_file, stderr=log_file, 
+                                        executable='/bin/bash', text=True)
+            self.processes["ego_planner"] = planner_process
+            
+            # 短暂等待确认启动
+            time.sleep(2)
+            
+            # 完成启动
+            progress_dialog.setValue(100)
+            progress_dialog.setLabelText("导航系统启动完成！")
+            QApplication.processEvents()
+            time.sleep(1)
+            progress_dialog.close()
+            
+            # 显示成功消息
+            QMessageBox.information(self, "启动完成", f"无人机导航系统已启动！\n\n所有日志文件保存在:\n{log_dir}")
             
         except Exception as e:
-            QMessageBox.critical(self, "启动错误", f"启动无人机系统时出错: {str(e)}")
+            if 'progress_dialog' in locals() and progress_dialog is not None:
+                progress_dialog.close()
+            QMessageBox.critical(self, "启动错误", f"启动无人机导航系统时出错: {str(e)}")
     
+
     def monitorAllProcesses(self):
         """监视所有启动的进程状态"""
         try:
@@ -3660,130 +3696,8 @@ class MyViz(QMainWindow):
             if hasattr(self, timer_name) and getattr(self, timer_name).isActive():
                 getattr(self, timer_name).stop()  # 发生错误时也停止定时器
             return False
-            
-    def startSecondProcess(self, progress_dialog):
-        """启动第二个进程"""
-        try:
-            # 定义工作空间路径
-            zyc_faep = os.path.expanduser("~/zyc_faep")
-            
-            # 创建位姿转换模块日志文件
-            timestamp = time.strftime("%Y%m%d_%H%M%S")
-            # 使用新的路径工具函数获取日志目录
-            log_dir = get_data_directory("log")
-            vins_log = f"{log_dir}/vins_to_mavros_{timestamp}.log"
-            self.log_files["vins_to_mavros"] = vins_log
-            print(f"位姿转换模块日志文件: {vins_log}")
-            
-            # 后台启动第二个程序
-            cmd2 = f"cd {zyc_faep} && source {zyc_faep}/devel/setup.bash && rosrun vins_to_mavros vins_to_mavros_node"
-            with open(vins_log, 'w') as log_file:
-                process2 = subprocess.Popen(cmd2, shell=True, stdout=log_file, stderr=log_file, 
-                                        executable='/bin/bash', text=True)
-            
-            # 等待2秒，检查初期启动情况
-            timeout = 2  # 2秒超时检查
-            start_time = time.time()
-            
-            # 非阻塞方式检查进程是否已结束
-            while time.time() - start_time < timeout:
-                returncode = process2.poll()
-                if returncode is not None:  # 进程已结束
-                    if returncode != 0:
-                        # 获取错误输出
-                        _, stderr = process2.communicate()
-                        error_msg = f"启动位姿转换模块失败，返回代码: {returncode}\n\n错误信息:\n{stderr[:500]}..."
-                        QMessageBox.critical(self, "启动错误", error_msg)
-                        progress_dialog.close()
-                        return
-                    break
-                    
-                # 更新进度条
-                progress = int(50 + min(25, (time.time() - start_time) / timeout * 25))
-                progress_dialog.setValue(progress)
-                QApplication.processEvents()
-                time.sleep(0.1)
-            
-            # 设置一个定时器检查进程是否在后续运行中出错
-            self.check_process2_timer = QTimer()
-            self.check_process2_timer.timeout.connect(lambda: self.checkProcessStatus(process2, "位姿转换模块"))
-            self.check_process2_timer.start(2000)  # 每2秒检查一次
-            
-            # 更新进度
-            progress_dialog.setValue(75)
-            progress_dialog.setLabelText("启动坐标转换模块...")
-            QApplication.processEvents()
-            
-            # 延迟启动第三个进程
-            QTimer.singleShot(3000, lambda: self.startThirdProcess(progress_dialog))
-            
-        except Exception as e:
-            progress_dialog.close()
-            QMessageBox.critical(self, "启动错误", f"启动第二个进程时出错: {str(e)}")
     
-    def startThirdProcess(self, progress_dialog):
-        """启动第三个进程"""
-        try:
-            # 定义工作空间路径
-            zyc_faep = os.path.expanduser("~/zyc_faep")
-            
-            # 创建坐标转换模块日志文件
-            timestamp = time.strftime("%Y%m%d_%H%M%S")
-            # 使用新的路径工具函数获取日志目录
-            log_dir = get_data_directory("log")
-            pose_to_odom_log = f"{log_dir}/pose_to_odom_{timestamp}.log"
-            self.log_files["pose_to_odom"] = pose_to_odom_log
-            print(f"坐标转换模块日志文件: {pose_to_odom_log}")
-            
-            # 后台启动第三个程序
-            cmd3 = f"cd {zyc_faep} && source {zyc_faep}/devel/setup.bash && rosrun pose_to_odom_converter pose_to_odom_converter_node"
-            with open(pose_to_odom_log, 'w') as log_file:
-                process3 = subprocess.Popen(cmd3, shell=True, stdout=log_file, stderr=log_file, 
-                                        executable='/bin/bash', text=True)
-            
-            # 等待2秒，检查初期启动情况
-            timeout = 2  # 2秒超时检查
-            start_time = time.time()
-            
-            # 非阻塞方式检查进程是否已结束
-            while time.time() - start_time < timeout:
-                returncode = process3.poll()
-                if returncode is not None:  # 进程已结束
-                    if returncode != 0:
-                        # 获取错误输出
-                        _, stderr = process3.communicate()
-                        error_msg = f"启动坐标转换模块失败，返回代码: {returncode}\n\n错误信息:\n{stderr[:500]}..."
-                        QMessageBox.critical(self, "启动错误", error_msg)
-                        progress_dialog.close()
-                        return
-                    break
-                    
-                # 更新进度条
-                progress = int(75 + min(20, (time.time() - start_time) / timeout * 20))
-                progress_dialog.setValue(progress)
-                QApplication.processEvents()
-                time.sleep(0.1)
-            
-            # 设置一个定时器检查进程是否在后续运行中出错
-            self.check_process3_timer = QTimer()
-            self.check_process3_timer.timeout.connect(lambda: self.checkProcessStatus(process3, "坐标转换模块"))
-            self.check_process3_timer.start(2000)  # 每2秒检查一次
-            
-            # 完成启动
-            progress_dialog.setValue(100)
-            QApplication.processEvents()
-            progress_dialog.close()
-            
-            # 通知用户系统已成功启动基础模块，需要进一步校准
-            QMessageBox.information(self, "初始启动完成", "无人机基础系统已启动，请准备进行摄像头位置校准！")
-            
-            # 自动打开日志窗口并显示odom话题的数据
-            QTimer.singleShot(3000, self.showOdomLog)
-            
-        except Exception as e:
-            progress_dialog.close()
-            QMessageBox.critical(self, "启动错误", f"启动第三个进程时出错: {str(e)}")
-    
+
     def setupTopicSubscriber(self):
         """初始化话题订阅器和相关回调函数"""
         try:
@@ -3890,314 +3804,7 @@ class MyViz(QMainWindow):
             self.manual_controller = None
             return False
 
-    def showOdomLog(self):
-        """显示odom话题的日志"""
-        try:
-            # 先确保日志窗口打开
-            if not self.log_button.isChecked():
-                self.log_button.click()
-                
-            # 等待日志窗口显示
-            QTimer.singleShot(500, lambda: self.selectOdomTopic())
-            
-            # 显示摄像头校准对话框
-            QTimer.singleShot(3000, self.showCameraCalibrationDialog)
-            
-        except Exception as e:
-            print(f"显示odom话题日志时出错: {str(e)}")
-    
-    def showCameraCalibrationDialog(self):
-        """显示摄像头校准对话框"""
-        try:
-            # 创建对话框
-            dialog = QDialog(self)
-            dialog.setWindowTitle("摄像头校准")
-            dialog.setMinimumSize(400, 200)
-            dialog.setStyleSheet("""
-                QDialog {
-                    background-color: #1E2330;
-                    color: #FFFFFF;
-                }
-                QLabel {
-                    color: #FFFFFF;
-                    font-size: 14pt;
-                }
-                QPushButton {
-                    background-color: #2980B9;
-                    color: white;
-                    border-radius: 4px;
-                    padding: 10px 20px;
-                    font-size: 12pt;
-                    font-weight: bold;
-                    min-height: 40px;
-                }
-                QPushButton#completeBtn {
-                    background-color: #27AE60;
-                }
-                QPushButton#completeBtn:hover {
-                    background-color: #2ECC71;
-                }
-                QPushButton#terminateBtn {
-                    background-color: #E74C3C;
-                }
-                QPushButton#terminateBtn:hover {
-                    background-color: #C0392B;
-                }
-            """)
-            
-            # 创建垂直布局
-            layout = QVBoxLayout(dialog)
-            
-            # 添加提示标签
-            label = QLabel("请对无人机摄像头位置进行校准")
-            label.setAlignment(Qt.AlignCenter)
-            label.setStyleSheet("margin-bottom: 20px;")
-            layout.addWidget(label)
-            
-            # 添加按钮布局
-            button_layout = QHBoxLayout()
-            
-            # 终止按钮
-            terminate_btn = QPushButton("终止")
-            terminate_btn.setObjectName("terminateBtn")
-            terminate_btn.clicked.connect(lambda: self.handleCalibrationResponse(dialog, False))
-            button_layout.addWidget(terminate_btn)
-            
-            # 校准完成按钮
-            complete_btn = QPushButton("校准完成")
-            complete_btn.setObjectName("completeBtn")
-            complete_btn.clicked.connect(lambda: self.handleCalibrationResponse(dialog, True))
-            button_layout.addWidget(complete_btn)
-            
-            # 添加按钮布局到主布局
-            layout.addLayout(button_layout)
-            
-            # 显示对话框（模态）
-            dialog.setModal(True)
-            dialog.exec_()
-            
-        except Exception as e:
-            print(f"显示摄像头校准对话框时出错: {str(e)}")
-            # 如果对话框显示出错，继续执行额外脚本
-            self.executeAdditionalScripts()
-    
-    def handleCalibrationResponse(self, dialog, completed):
-        """处理校准对话框的响应"""
-        try:
-            # 关闭对话框
-            dialog.accept()
-            
-            if completed:
-                # 用户点击了"校准完成"，继续执行额外脚本
-                QMessageBox.information(self, "校准完成", "准备启动无人机探索系统...")
-                self.executeAdditionalScripts()
-            else:
-                # 用户点击了"终止"，停止后续执行
-                QMessageBox.warning(self, "启动终止", "系统启动已被用户终止")
-                
-        except Exception as e:
-            print(f"处理校准响应时出错: {str(e)}")
-    
-    def executeAdditionalScripts(self):
-        """执行额外的启动脚本"""
-        try:
-            # 创建日志目录 - 使用新的路径工具函数
-            log_dir = get_data_directory("log")
-            timestamp = time.strftime("%Y%m%d_%H%M%S")
-            
-            # 存储所有日志文件路径
-            if not hasattr(self, 'log_files'):
-                self.log_files = {}
-            
-            # 显示进度对话框
-            progress_dialog = QProgressDialog("正在启动无人机探索系统...", "取消", 0, 100, self)
-            progress_dialog.setWindowTitle("系统启动")
-            progress_dialog.setWindowModality(Qt.WindowModal)
-            progress_dialog.setCancelButton(None)  # 禁用取消按钮
-            progress_dialog.setValue(0)
-            progress_dialog.show()
-            QApplication.processEvents()
-            
-            # 定义工作空间路径
-            zyc_faep = os.path.expanduser("~/zyc_faep")
-            shiyan_catkin_ws_target = os.path.expanduser("~/shiyan_catkin_ws_target")
 
-            # 更新进度
-            progress_dialog.setValue(10)
-            progress_dialog.setLabelText("启动探索管理器...")
-            QApplication.processEvents()
-
-            # 创建探索管理器日志文件
-            exploration_log = f"{log_dir}/exploration_manager_{timestamp}.log"
-            self.log_files["exploration_manager"] = exploration_log
-            print(f"探索管理器日志文件: {exploration_log}")
-
-            # 启动探索管理器（后台运行，输出重定向到日志文件）
-            cmd1 = f"cd {zyc_faep} && source devel/setup.bash && roslaunch exploration_manager exploration.launch"
-            with open(exploration_log, 'w') as log_file:
-                exploration_process = subprocess.Popen(cmd1, shell=True, stdout=log_file, stderr=log_file, executable='/bin/bash')
-            
-            # 等待探索管理器启动
-            wait_time = 0
-            max_wait = 10  # 最多等待10秒
-            while wait_time < max_wait:
-                # 更新等待信息
-                progress_dialog.setLabelText(f"启动探索管理器...({wait_time+1}/{max_wait}秒)")
-                QApplication.processEvents()
-                
-                # 检查探索管理器是否已启动
-                try:
-                    check_cmd = "rosnode list | grep -q exploration"
-                    check_result = subprocess.run(check_cmd, shell=True)
-                    if check_result.returncode == 0:
-                        print("检测到探索管理器节点已启动")
-                        break
-                except Exception as e:
-                    print(f"检查探索管理器节点时出错: {str(e)}")
-                
-                time.sleep(1)
-                wait_time += 1
-                progress_dialog.setValue(10 + int(wait_time * 20 / max_wait))  # 进度从10%逐渐增加到30%
-
-            # 更新进度
-            progress_dialog.setValue(30)
-            progress_dialog.setLabelText("启动YOLO检测器...")
-            QApplication.processEvents()
-            
-            # 创建YOLO检测器日志文件
-            yolo_log = f"{log_dir}/yolo_detector_{timestamp}.log"
-            self.log_files["yolo_detector"] = yolo_log
-            print(f"YOLO检测器日志文件: {yolo_log}")
-            
-            # 启动YOLO检测器（后台运行，输出重定向到日志文件）
-            cmd2 = f"cd {shiyan_catkin_ws_target} && source devel/setup.bash && roslaunch yolo_detector yolo_ros.launch"
-            with open(yolo_log, 'w') as log_file:
-                yolo_process = subprocess.Popen(cmd2, shell=True, stdout=log_file, stderr=log_file, executable='/bin/bash')
-            
-            # 等待并检查YOLO是否正常启动
-            wait_time = 0
-            max_wait = 20  # 最多等待20秒
-            while wait_time < max_wait:
-                # 每秒更新一次进度条和等待时间
-                progress_dialog.setValue(30 + int(wait_time * 10 / max_wait))
-                progress_dialog.setLabelText(f"启动YOLO检测器...({wait_time}/{max_wait}秒)")
-                QApplication.processEvents()
-                
-                # 如果进程已结束且返回非零值，说明启动失败
-                if yolo_process.poll() is not None and yolo_process.returncode != 0:
-                    # 读取日志文件中的错误信息
-                    with open(yolo_log, 'r') as log_file:
-                        last_lines = log_file.readlines()[-20:] if log_file.readable() else []
-                        error_msg = "启动YOLO检测器失败，错误信息:\n" + "".join(last_lines)
-                    
-                    print(f"YOLO检测器启动失败: {error_msg}")
-                    QMessageBox.warning(self, "启动警告", "YOLO检测器可能启动失败，已记录到日志文件")
-                    break
-                
-                # 尝试确认YOLO是否已启动
-                try:
-                    # 检查相关节点或话题是否存在
-                    check_cmd = "rosnode list | grep -q yolo"
-                    check_result = subprocess.run(check_cmd, shell=True)
-                    if check_result.returncode == 0:
-                        print("检测到YOLO节点已启动")
-                        break
-                except Exception as e:
-                    print(f"检查YOLO节点时出错: {str(e)}")
-                
-                time.sleep(1)
-                wait_time += 1
-
-            # 更新进度
-            progress_dialog.setValue(50)
-            progress_dialog.setLabelText("启动SORT跟踪...")
-            QApplication.processEvents()
-
-            # 创建SORT跟踪日志文件
-            sort_log = f"{log_dir}/sort_ros_{timestamp}.log"
-            self.log_files["sort_ros"] = sort_log
-            print(f"SORT跟踪日志文件: {sort_log}")
-
-            # 启动SORT跟踪（后台运行，输出重定向到日志文件）
-            cmd3 = f"cd {shiyan_catkin_ws_target} && source devel/setup.bash && roslaunch sort_ros sort_ros.launch"
-            with open(sort_log, 'w') as log_file:
-                sort_process = subprocess.Popen(cmd3, shell=True, stdout=log_file, stderr=log_file, executable='/bin/bash')
-            
-            # 等待SORT启动
-            time.sleep(5)  # 等待5秒
-
-            # 更新进度
-            progress_dialog.setValue(70)
-            progress_dialog.setLabelText("启动目标位置跟踪脚本...")
-            QApplication.processEvents()
-            time.sleep(3)  # 等待3秒
-
-            # 创建小球位置跟踪脚本日志文件
-            ball_tracker_log = f"{log_dir}/ball_pose_tracker_{timestamp}.log"
-            self.log_files["ball_pose_tracker"] = ball_tracker_log
-            print(f"小球位置跟踪脚本日志文件: {ball_tracker_log}")
-
-            # 获取当前程序目录
-            app_dir = get_application_directory()
-
-            # 启动小球位置跟踪脚本（后台运行，输出重定向到日志文件）
-            cmd4 = f"cd {app_dir} && python3 ball_pose_tracker.py"
-            with open(ball_tracker_log, 'w') as log_file:
-                ball_tracker_process = subprocess.Popen(cmd4, shell=True, stdout=log_file, stderr=log_file, executable='/bin/bash')
-
-            # 将进程添加到进程管理字典中
-            self.processes["ball_tracker"] = ball_tracker_process
-            print(f"小球位置跟踪脚本已启动，PID: {ball_tracker_process.pid}")
-
-            # 更新进度
-            progress_dialog.setValue(90)
-            progress_dialog.setLabelText("启动导航系统...")
-            QApplication.processEvents()
-            time.sleep(2)  # 等待2秒
-
-            # 创建导航系统日志文件
-            nav_log = f"{log_dir}/fuel_nav_{timestamp}.log"
-            self.log_files["fuel_nav"] = nav_log
-            print(f"导航系统日志文件: {nav_log}")
-
-            # 启动导航系统（后台运行，输出重定向到日志文件）
-            cmd5 = f"cd {zyc_faep} && source devel/setup.bash && rosrun exploration_manager fuel_nav"
-            with open(nav_log, 'w') as log_file:
-                nav_process = subprocess.Popen(cmd5, shell=True, stdout=log_file, stderr=log_file, executable='/bin/bash')
-            
-            # 更新进度到100%
-            progress_dialog.setValue(100)
-            progress_dialog.setLabelText("完成所有启动步骤")
-            QApplication.processEvents()
-            time.sleep(1)  # 短暂延迟
-            progress_dialog.close()
-            
-
-            # 话题订阅器已在程序启动时初始化，这里不需要再次调用
-            
-            # 显示成功消息和日志文件位置
-            QMessageBox.information(self, "启动完成", f"无人机探索系统已启动!\n\n所有日志文件保存在:\n{log_dir}")
-            
-        except Exception as e:
-            if 'progress_dialog' in locals() and progress_dialog is not None:
-                progress_dialog.close()
-            
-            import traceback
-            error_details = traceback.format_exc()
-            print(f"执行额外脚本时出错:\n{error_details}")
-            
-            # 保存错误日志
-            try:
-                # 使用新的路径工具函数获取日志目录
-                log_dir = get_data_directory("log")
-                timestamp = time.strftime("%Y%m%d_%H%M%S")
-                error_log = f"{log_dir}/startup_error_{timestamp}.log"
-                with open(error_log, 'w') as log_file:
-                    log_file.write(error_details)
-                QMessageBox.critical(self, "启动错误", f"执行额外脚本时出错: {str(e)}\n\n完整错误日志已保存到:\n{error_log}")
-            except:
-                QMessageBox.critical(self, "启动错误", f"执行额外脚本时出错: {str(e)}")
-    
     def selectOdomTopic(self):
         """选择odom话题"""
         try:
@@ -5148,29 +4755,49 @@ class MyViz(QMainWindow):
             QMessageBox.critical(self, "停止失败", error_msg)
 
     def publishNavigationGoal(self):
-        """发布导航目标点到/move_base_simple/goal话题"""
+        """打开目标点设置对话框"""
         try:
-            # 弹出确认对话框
-            reply = QMessageBox.question(self, "确认探索", 
-                                     "确定要开始探索模式吗？", 
-                                     QMessageBox.Yes | QMessageBox.No,
-                                     QMessageBox.No)  # 默认选择"否"
-            
-            if reply != QMessageBox.Yes:
-                # 用户未确认，不执行操作
+            if WaypointDialog is None:
+                QMessageBox.critical(self, "模块错误", "无法加载目标点对话框模块")
                 return
             
-            # 创建目标点消息
+            # 如果对话框已存在，显示并激活它
+            if hasattr(self, 'waypoint_dialog') and self.waypoint_dialog is not None:
+                self.waypoint_dialog.show()
+                self.waypoint_dialog.raise_()
+                self.waypoint_dialog.activateWindow()
+            else:
+                # 创建新的目标点对话框（非模态）
+                self.waypoint_dialog = WaypointDialog(self, self.topic_subscriber)
+                self.waypoint_dialog.show()
+            
+        except Exception as e:
+            QMessageBox.critical(self, "对话框错误", f"打开目标点对话框时出错: {str(e)}")
+
+    
+    def returnToHome(self):
+        """一键返航功能 - 返回原点(0, 0, 0.8)并自动降落"""
+        try:
+            # 弹出确认对话框
+            reply = QMessageBox.question(self, "确认返航", 
+                                     "确定要返回原点并降落吗？\n返航点: (0, 0, 0.8)",
+                                     QMessageBox.Yes | QMessageBox.No,
+                                     QMessageBox.No)
+            
+            if reply != QMessageBox.Yes:
+                return
+            
+            # 创建目标点消息 - 返回原点
             goal_msg = PoseStamped()
-            goal_msg.header.frame_id = "world"  # 使用地图坐标系
+            goal_msg.header.frame_id = "world"
             goal_msg.header.stamp = rospy.Time.now()
             
-            # 设置目标点位置
-            goal_msg.pose.position.x = 1.0
-            goal_msg.pose.position.y = 1.0
-            goal_msg.pose.position.z = 0.7
+            # 设置返航点位置
+            goal_msg.pose.position.x = 0.0
+            goal_msg.pose.position.y = 0.0
+            goal_msg.pose.position.z = 0.8
             
-            # 设置目标点朝向（使用默认朝向）
+            # 设置朝向
             goal_msg.pose.orientation.x = 0.0
             goal_msg.pose.orientation.y = 0.0
             goal_msg.pose.orientation.z = 0.0
@@ -5179,23 +4806,73 @@ class MyViz(QMainWindow):
             # 创建发布者
             goal_pub = rospy.Publisher('/move_base_simple/goal', PoseStamped, queue_size=10)
             
-            # 稍微延迟，确保发布者连接到订阅者
+            # 等待发布者连接
             rospy.sleep(0.5)
             
-            # 发布两次目标点
+            # 发布返航目标点
             goal_pub.publish(goal_msg)
-            rospy.loginfo("已发布第一次导航目标点: (1.0, 1.0, 0.7)")
+            rospy.loginfo("已发布返航目标点: (0, 0, 0.8)")
             
-            # 稍微延迟发布第二次
-            rospy.sleep(1.0)
+            # 显示返航中提示
+            QMessageBox.information(self, "返航中", "无人机正在返回原点，请等待到达后自动降落...")
             
-            # 更新时间戳并再次发布
-            goal_msg.header.stamp = rospy.Time.now()
-            goal_pub.publish(goal_msg)
-            rospy.loginfo("已发布第二次导航目标点: (1.0, 1.0, 0.7)")
+            # 启动定时器监控FSM状态，等待到达后发送降落命令
+            self.return_home_timer = QTimer()
+            self.return_home_timer.timeout.connect(self.checkReturnHomeStatus)
+            self.return_home_timer.start(500)  # 每500ms检查一次
             
         except Exception as e:
-            QMessageBox.critical(self, "发布错误", f"发布导航目标点时出错: {str(e)}")
+            QMessageBox.critical(self, "返航错误", f"返航时出错: {str(e)}")
+    
+    def checkReturnHomeStatus(self):
+        """检查返航状态，到达后发送降落命令"""
+        try:
+            # 获取FSM状态
+            fsm_state = 0
+            if hasattr(self, 'topic_subscriber') and self.topic_subscriber:
+                fsm_data = self.topic_subscriber.get_data("fsm_state")
+                if fsm_data:
+                    fsm_state = fsm_data.get("state", 0)
+            
+            # 当FSM状态为WAIT_TARGET(1)时，说明已到达返航点
+            if fsm_state == 1:  # WAIT_TARGET
+                # 停止定时器
+                if hasattr(self, 'return_home_timer'):
+                    self.return_home_timer.stop()
+                
+                # 发送降落命令
+                QTimer.singleShot(1000, self.sendLandingCommand)
+                
+        except Exception as e:
+            print(f"检查返航状态时出错: {e}")
+    
+    def sendLandingCommand(self):
+        """发送降落命令"""
+        try:
+            import subprocess
+            
+            # 发布降落命令
+            cmd = 'rostopic pub -1 /px4ctrl/takeoff_land quadrotor_msgs/TakeoffLand "takeoff_land_cmd: 2"'
+            
+            process = subprocess.Popen(cmd, shell=True, executable='/bin/bash',
+                                       stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            
+            stdout, stderr = process.communicate(timeout=10)
+            
+            if process.returncode == 0:
+                rospy.loginfo("已发送降落命令")
+                QMessageBox.information(self, "降落中", "无人机正在降落...")
+            else:
+                rospy.logerr(f"发送降落命令失败: {stderr.decode()}")
+                QMessageBox.warning(self, "降落失败", f"发送降落命令失败:\n{stderr.decode()}")
+                
+        except Exception as e:
+            print(f"发送降落命令时出错: {e}")
+            QMessageBox.critical(self, "降落错误", f"发送降落命令时出错: {str(e)}")
+    
+    def importPointCloud(self):
+        """导入点云功能（暂未实现）"""
+        QMessageBox.information(self, "功能提示", "导入点云功能暂未实现，敬请期待！")
 
     # 手动控制回调函数
     def onManualStart(self):

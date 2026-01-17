@@ -8,8 +8,7 @@ from sensor_msgs.msg import BatteryState, Image, Imu
 from mavros_msgs.msg import State, RCIn
 from nav_msgs.msg import Odometry
 from geometry_msgs.msg import TwistStamped
-from std_msgs.msg import Float32, Float64
-from visualization_msgs.msg import Marker
+from std_msgs.msg import Float32, Float64, Int32
 import threading
 import time
 import math
@@ -76,18 +75,6 @@ class TopicsSubscriber:
                 "height": 0,
                 "encoding": ""
             },
-            "marker": {
-                "id": 0,
-                "type": 0,
-                "pose": {
-                    "position": {"x": 0.0, "y": 0.0, "z": 0.0},
-                    "orientation": {"x": 0.0, "y": 0.0, "z": 0.0, "w": 1.0}
-                },
-                "scale": {"x": 0.0, "y": 0.0, "z": 0.0},
-                "color": {"r": 0.0, "g": 0.0, "b": 0.0, "a": 0.0},
-                "action": 0,
-                "text": ""
-            },
             "attitude": {
                 "pitch": 0.0,       # 俯仰角
                 "roll": 0.0,        # 滚转角
@@ -97,6 +84,11 @@ class TopicsSubscriber:
             "rc_input": {
                 "channels": [],
                 "rssi": 0
+            },
+            "fsm_state": {
+                "state": 0,  # FSM状态码
+                "state_name": "INIT",  # 状态名称
+                "timestamp": 0.0
             }
         }
         
@@ -115,9 +107,9 @@ class TopicsSubscriber:
             "camera": False,
             "depth": False,
             "bird_view": False,
-            "marker": False,
             "attitude": False,
-            "rc_input": False
+            "rc_input": False,
+            "fsm_state": False
         }
         
         # 初始化cv_bridge
@@ -263,20 +255,6 @@ class TopicsSubscriber:
                     print(f"订阅鸟瞰图话题时出错: {str(e)}")
                     self.topics_active["bird_view"] = False
         
-        # 检查并订阅标记点话题
-        if "marker" in self.config and self.config["marker"]["topic"] in published_topics:
-            if "marker" not in self.subscribers or not self.subscribers["marker"]:
-                try:
-                    self.subscribers["marker"] = rospy.Subscriber(
-                        self.config["marker"]["topic"],
-                        Marker,
-                        self.marker_callback
-                    )
-                    self.topics_active["marker"] = True
-                    rospy.loginfo(f"成功订阅标记点话题: {self.config['marker']['topic']}")
-                except Exception as e:
-                    rospy.logerr(f"订阅标记点话题失败: {str(e)}")
-                    
         # 检查并订阅姿态数据话题
         if "attitude" in self.config and self.config["attitude"]["topic"] in published_topics:
             if "attitude" not in self.subscribers or not self.subscribers["attitude"]:
@@ -305,6 +283,20 @@ class TopicsSubscriber:
                     rospy.loginfo(f"成功订阅RC输入话题: {self.config['rc_input']['topic']}")
                 except Exception as e:
                     rospy.logerr(f"订阅RC输入话题失败: {str(e)}")
+        
+        # 检查并订阅FSM状态话题
+        if "fsm_state" in self.config and self.config["fsm_state"]["topic"] in published_topics:
+            if "fsm_state" not in self.subscribers or not self.subscribers["fsm_state"]:
+                try:
+                    self.subscribers["fsm_state"] = rospy.Subscriber(
+                        self.config["fsm_state"]["topic"],
+                        Int32,
+                        self.fsm_state_callback
+                    )
+                    self.topics_active["fsm_state"] = True
+                    rospy.loginfo(f"成功订阅FSM状态话题: {self.config['fsm_state']['topic']}")
+                except Exception as e:
+                    rospy.logerr(f"订阅FSM状态话题失败: {str(e)}")
     
     def battery_callback(self, msg):
         """电池状态话题回调函数"""
@@ -495,54 +487,6 @@ class TopicsSubscriber:
         except Exception as e:
             print(f"处理鸟瞰图话题时出错: {str(e)}")
     
-    def marker_callback(self, msg):
-        """标记点话题回调函数"""
-        try:
-            # 只处理小球标记(SPHERE类型)
-            if msg.type == Marker.SPHERE:
-                # 更新标记点数据
-                self.data["marker"]["id"] = msg.id
-                self.data["marker"]["type"] = msg.type
-                
-                # 更新位置信息
-                self.data["marker"]["pose"]["position"]["x"] = msg.pose.position.x
-                self.data["marker"]["pose"]["position"]["y"] = msg.pose.position.y
-                self.data["marker"]["pose"]["position"]["z"] = msg.pose.position.z
-                
-                # 更新方向信息
-                self.data["marker"]["pose"]["orientation"]["x"] = msg.pose.orientation.x
-                self.data["marker"]["pose"]["orientation"]["y"] = msg.pose.orientation.y
-                self.data["marker"]["pose"]["orientation"]["z"] = msg.pose.orientation.z
-                self.data["marker"]["pose"]["orientation"]["w"] = msg.pose.orientation.w
-                
-                # 更新尺寸信息
-                self.data["marker"]["scale"]["x"] = msg.scale.x
-                self.data["marker"]["scale"]["y"] = msg.scale.y
-                self.data["marker"]["scale"]["z"] = msg.scale.z
-                
-                # 更新颜色信息
-                self.data["marker"]["color"]["r"] = msg.color.r
-                self.data["marker"]["color"]["g"] = msg.color.g
-                self.data["marker"]["color"]["b"] = msg.color.b
-                self.data["marker"]["color"]["a"] = msg.color.a
-                
-                # 更新动作信息
-                self.data["marker"]["action"] = msg.action
-                
-                # 更新文本信息(如果有)
-                if hasattr(msg, "text"):
-                    self.data["marker"]["text"] = msg.text
-                
-                # 触发注册的回调函数
-                if "marker" in self.callbacks:
-                    for callback in self.callbacks["marker"]:
-                        try:
-                            callback(self.data["marker"])
-                        except Exception as e:
-                            rospy.logerr(f"执行标记点回调函数时出错: {str(e)}")
-        except Exception as e:
-            rospy.logerr(f"处理标记点数据时出错: {str(e)}")
-    
     def attitude_callback(self, msg):
         """处理姿态数据，从IMU四元数转换为欧拉角"""
         try:
@@ -636,3 +580,38 @@ class TopicsSubscriber:
                         rospy.logerr(f"执行RC输入回调函数时出错: {str(e)}")
         except Exception as e:
             rospy.logerr(f"处理RC输入数据时出错: {str(e)}")
+    
+    def fsm_state_callback(self, msg):
+        """处理FSM状态数据"""
+        try:
+            # FSM状态码名称映射
+            FSM_STATE_NAMES = {
+                0: "INIT",
+                1: "WAIT_TARGET",
+                2: "GEN_NEW_TRAJ",
+                3: "REPLAN_TRAJ",
+                4: "EXEC_TRAJ",
+                5: "EMERGENCY_STOP",
+                6: "SEQUENTIAL_START"
+            }
+            
+            state_code = msg.data
+            state_name = FSM_STATE_NAMES.get(state_code, f"UNKNOWN({state_code})")
+            
+            # 更新FSM状态数据
+            self.data["fsm_state"]["state"] = state_code
+            self.data["fsm_state"]["state_name"] = state_name
+            self.data["fsm_state"]["timestamp"] = rospy.Time.now().to_sec()
+            
+            # 设置话题活跃状态
+            self.topics_active["fsm_state"] = True
+            
+            # 触发注册的回调函数
+            if "fsm_state" in self.callbacks:
+                for callback in self.callbacks["fsm_state"]:
+                    try:
+                        callback(self.data["fsm_state"])
+                    except Exception as e:
+                        rospy.logerr(f"执行FSM状态回调函数时出错: {str(e)}")
+        except Exception as e:
+            rospy.logerr(f"处理FSM状态数据时出错: {str(e)}")

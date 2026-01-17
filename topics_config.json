@@ -24,13 +24,13 @@
         "fields": ["linear", "angular"]
     },
     "camera": {
-        "topic": "/image_converter/output_video",
+        "topic": "/camera/color/image_raw",
         "msg_type": "sensor_msgs/Image",
         "description": "无人机RGB检测图像",
         "fields": ["data", "encoding", "width", "height"]
     },
     "depth": {
-        "topic": "/camera/depth/image_rect_raw",
+        "topic": "/camera/depth_aligned_to_color_and_infra1/image_raw",
         "msg_type": "sensor_msgs/Image",
         "description": "无人机深度摄像头图像",
         "fields": ["data", "encoding", "width", "height"]
@@ -40,12 +40,6 @@
         "msg_type": "sensor_msgs/Image",
         "description": "障碍物鸟瞰图",
         "fields": ["data", "encoding", "width", "height"]
-    },
-    "marker": {
-        "topic": "/visualization_marker",
-        "msg_type": "visualization_msgs/Marker",
-        "description": "搜索人员标记点",
-        "fields": ["id", "type", "pose", "scale", "color", "action"]
     },
     "attitude": {
         "topic": "/mavros/imu/data",
@@ -58,5 +52,11 @@
         "msg_type": "mavros_msgs/RCIn",
         "description": "遥控器输入信号",
         "fields": ["header", "rssi", "channels"]
+    },
+    "fsm_state": {
+        "topic": "/drone_0_ego_planner_node/planning/fsm_state",
+        "msg_type": "std_msgs/Int32",
+        "description": "规划器状态机状态",
+        "fields": ["data"]
     }
 }

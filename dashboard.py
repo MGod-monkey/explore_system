@@ -385,8 +385,10 @@ class SlidingControlCenter(QWidget):
 
     # 信号定义 - 自主飞行页面
     centerClicked = pyqtSignal()  # 中央按钮点击信号 - 一键启动
-    leftClicked = pyqtSignal()    # 左侧按钮点击信号 - 开始探索
+    leftClicked = pyqtSignal()    # 左侧按钮点击信号 - 前往目标
     rightClicked = pyqtSignal()   # 右侧按钮点击信号 - 停止程序
+    topClicked = pyqtSignal()     # 顶部按钮点击信号 - 一键返航
+    bottomClicked = pyqtSignal()  # 底部按钮点击信号 - 导入点云
 
     # 信号定义 - 手动控制页面
     manualStartClicked = pyqtSignal()    # 手动控制启动信号
@@ -568,6 +570,8 @@ class SlidingControlCenter(QWidget):
         self.ui_button.centerClicked.connect(self.centerClicked.emit)
         self.ui_button.leftClicked.connect(self.leftClicked.emit)
         self.ui_button.rightClicked.connect(self.rightClicked.emit)
+        self.ui_button.topClicked.connect(self.topClicked.emit)
+        self.ui_button.bottomClicked.connect(self.bottomClicked.emit)
 
         # 安装事件过滤器，让UIButton的鼠标事件也能传递给父组件
         self.ui_button.installEventFilter(self)
@@ -912,20 +916,22 @@ class UIButton(QWidget):
         
         # 设置文本
         self.centerText = "一键启动"  # 中间按钮现在使用图标，文本作为工具提示显示
-        # self.topText = "一键返航"
+        self.topText = "一键返航"
         self.rightText = "停止程序"
-        self.leftText = "开始探索"
-        # self.bottomText = "功能待定"
+        self.leftText = "前往目标"
+        self.bottomText = "导入点云"
         
         # 设置颜色 - 使用现代化渐变配色方案
         self.centerColor = QColor("#27AE60")  # 现代绿色，启动按钮
         self.centerColorHover = QColor("#2ECC71")  # 悬停时的亮绿色
         self.topColor = QColor("#8E44AD")     # 紫色，返航按钮
+        self.topColorHover = QColor("#9B59B6")  # 悬停时的亮紫色
         self.rightColor = QColor("#E74C3C")   # 现代红色，停止按钮
         self.rightColorHover = QColor("#C0392B")  # 悬停时的深红色
-        self.leftColor = QColor("#3498DB")    # 现代蓝色，探索按钮
+        self.leftColor = QColor("#3498DB")    # 现代蓝色，导航按钮
         self.leftColorHover = QColor("#2980B9")  # 悬停时的深蓝色
-        self.bottomColor = QColor("#7F8C8D")  # 灰色，待定按钮
+        self.bottomColor = QColor("#17A589")  # 青绿色，导入点云按钮
+        self.bottomColorHover = QColor("#1ABC9C")  # 悬停时的亮青绿色
 
         # 加载中间按钮图标
         self.centerIcon = QPixmap(":/images/icons/start.svg")
@@ -1011,54 +1017,71 @@ class UIButton(QWidget):
         
         painter.restore()
 
-    # def drawOuterCircle(self, painter):
-    #     """绘制顶部按钮"""
-    #     painter.save()
-    #     # 设置标志位，判断鼠标是否进入该区域
-    #     if self.mouseTopView:
-    #         radius1 = self.outerPieRadius + 4
-    #     else:
-    #         radius1 = self.outerPieRadius
+    def drawOuterCircle(self, painter):
+        """绘制顶部按钮（一键返航）"""
+        painter.save()
+        # 设置标志位，判断鼠标是否进入该区域
+        if self.mouseTopView:
+            radius1 = self.outerPieRadius + 4
+        else:
+            radius1 = self.outerPieRadius
 
-    #     # 绘制大扇形
-    #     rect = QRectF(-radius1/2, -radius1/2, radius1, radius1)
-    #     pathOuterChampagnePie = QPainterPath()
-    #     pathOuterChampagnePie.arcMoveTo(rect, 45)
-    #     pathOuterChampagnePie.arcTo(rect, 45, 90)
-    #     pathOuterChampagnePie.lineTo(0, 0)
-    #     pathOuterChampagnePie.closeSubpath()
+        # 绘制大扇形
+        rect = QRectF(-radius1/2, -radius1/2, radius1, radius1)
+        pathOuterChampagnePie = QPainterPath()
+        pathOuterChampagnePie.arcMoveTo(rect, 45)
+        pathOuterChampagnePie.arcTo(rect, 45, 90)
+        pathOuterChampagnePie.lineTo(0, 0)
+        pathOuterChampagnePie.closeSubpath()
         
-    #     # 设置文字路径
-    #     textPath = QPainterPath()
-    #     # 使用更小的字体
-    #     font = QFont("WenQuanYi Micro Hei", 8)
-    #     # 位置调整，使文字在扇形中央
-    #     textX = -radius1 * 0.12
-    #     textY = -radius1 * 0.3
-    #     textPath.addText(textX, textY, font, self.topText)
+        # 设置文字字体和位置 - 调整使文字居中
+        font = QFont("WenQuanYi Micro Hei", 8)
+        font.setWeight(QFont.Normal)
+        # 计算文字宽度以居中
+        fm = QFontMetrics(font)
+        textWidth = fm.horizontalAdvance(self.topText)
+        textX = -textWidth / 2.0
+        textY = -radius1 * 0.28
  
-    #     # 绘制小扇形
-    #     radius = self.innerPieRadius
-    #     rect1 = QRectF(-radius/2, -radius/2, radius, radius)
-    #     pathMidPie = QPainterPath()
-    #     pathMidPie.arcMoveTo(rect1, 45)
-    #     pathMidPie.arcTo(rect1, 45, 90)
-    #     pathMidPie.lineTo(0, 0)
-    #     pathMidPie.closeSubpath()
+        # 绘制小扇形
+        radius = self.innerPieRadius
+        rect1 = QRectF(-radius/2, -radius/2, radius, radius)
+        pathMidPie = QPainterPath()
+        pathMidPie.arcMoveTo(rect1, 45)
+        pathMidPie.arcTo(rect1, 45, 90)
+        pathMidPie.lineTo(0, 0)
+        pathMidPie.closeSubpath()
 
-    #     # 大扇形减去小扇形，得到扇形饼圆
-    #     self.topBtnView = pathOuterChampagnePie.subtracted(pathMidPie)
+        # 大扇形减去小扇形，得到扇形饼圆
+        self.topBtnView = pathOuterChampagnePie.subtracted(pathMidPie)
         
-    #     # 绘制图形和文字
-    #     painter.setPen(Qt.NoPen)
-    #     painter.setBrush(self.topColor)
-    #     painter.drawPath(self.topBtnView)
+        # 创建渐变效果
+        gradient = QRadialGradient(0, 0, radius1/2)
+        if self.mouseTopView:
+            gradient.setColorAt(0, self.topColorHover)
+            gradient.setColorAt(0.7, self.topColor)
+            gradient.setColorAt(1, self.topColor.darker(120))
+        else:
+            gradient.setColorAt(0, self.topColor.lighter(110))
+            gradient.setColorAt(0.7, self.topColor)
+            gradient.setColorAt(1, self.topColor.darker(110))
+
+        # 绘制图形
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QBrush(gradient))
+        painter.drawPath(self.topBtnView)
+
+        # 添加边框效果
+        painter.setPen(QPen(self.topColor.lighter(150), 1))
+        painter.setBrush(Qt.NoBrush)
+        painter.drawPath(self.topBtnView)
         
-    #     # 绘制文字
-    #     painter.setPen(Qt.black)
-    #     painter.drawPath(textPath)
+        # 绘制文字
+        painter.setFont(font)
+        painter.setPen(QColor("#FFFFFF"))
+        painter.drawText(int(textX), int(textY), self.topText)
         
-    #     painter.restore()
+        painter.restore()
 
     def drawInnerPie(self, painter):
         """绘制左侧按钮"""
@@ -1124,54 +1147,70 @@ class UIButton(QWidget):
         
         painter.restore()
 
-    # def drawBottom(self, painter):
-    #     """绘制底部按钮"""
-    #     painter.save()
-    #     # 设置标志位，判断鼠标是否进入该区域
-    #     if self.mouseBottomView:
-    #         radius1 = self.outerPieRadius + 4
-    #     else:
-    #         radius1 = self.outerPieRadius
+    def drawBottom(self, painter):
+        """绘制底部按钮（导入点云）"""
+        painter.save()
+        # 设置标志位，判断鼠标是否进入该区域
+        if self.mouseBottomView:
+            radius1 = self.outerPieRadius + 4
+        else:
+            radius1 = self.outerPieRadius
 
-    #     # 绘制大扇形
-    #     rect = QRectF(-radius1/2, -radius1/2, radius1, radius1)
-    #     pathOuterChampagnePie = QPainterPath()
-    #     pathOuterChampagnePie.arcMoveTo(rect, 225)
-    #     pathOuterChampagnePie.arcTo(rect, 225, 90)
-    #     pathOuterChampagnePie.lineTo(0, 0)
-    #     pathOuterChampagnePie.closeSubpath()
+        # 绘制大扇形
+        rect = QRectF(-radius1/2, -radius1/2, radius1, radius1)
+        pathOuterChampagnePie = QPainterPath()
+        pathOuterChampagnePie.arcMoveTo(rect, 225)
+        pathOuterChampagnePie.arcTo(rect, 225, 90)
+        pathOuterChampagnePie.lineTo(0, 0)
+        pathOuterChampagnePie.closeSubpath()
         
-    #     # 设置文字路径
-    #     textPath = QPainterPath()
-    #     # 使用更小的字体
-    #     font = QFont("WenQuanYi Micro Hei", 8)
-    #     # 位置调整，使文字在扇形中央
-    #     textX = -radius1 * 0.12
-    #     textY = radius1 * 0.35
-    #     textPath.addText(textX, textY, font, self.bottomText)
+        # 设置文字字体和位置 - 居中显示
+        font = QFont("WenQuanYi Micro Hei", 8)
+        font.setWeight(QFont.Normal)
+        fm = QFontMetrics(font)
+        textWidth = fm.horizontalAdvance(self.bottomText)
+        textX = -textWidth / 2.0
+        textY = radius1 * 0.32
 
-    #     # 绘制小扇形
-    #     radius = self.innerPieRadius
-    #     rect1 = QRectF(-radius/2, -radius/2, radius, radius)
-    #     pathMidPie = QPainterPath()
-    #     pathMidPie.arcMoveTo(rect1, 225)
-    #     pathMidPie.arcTo(rect1, 225, 90)
-    #     pathMidPie.lineTo(0, 0)
-    #     pathMidPie.closeSubpath()
+        # 绘制小扇形
+        radius = self.innerPieRadius
+        rect1 = QRectF(-radius/2, -radius/2, radius, radius)
+        pathMidPie = QPainterPath()
+        pathMidPie.arcMoveTo(rect1, 225)
+        pathMidPie.arcTo(rect1, 225, 90)
+        pathMidPie.lineTo(0, 0)
+        pathMidPie.closeSubpath()
 
-    #     # 大扇形减去小扇形，得到扇形饼圆
-    #     self.bottomBtnView = pathOuterChampagnePie.subtracted(pathMidPie)
+        # 大扇形减去小扇形，得到扇形饼圆
+        self.bottomBtnView = pathOuterChampagnePie.subtracted(pathMidPie)
         
-    #     # 绘制图形和文字
-    #     painter.setPen(Qt.NoPen)
-    #     painter.setBrush(self.bottomColor)
-    #     painter.drawPath(self.bottomBtnView)
+        # 创建渐变效果
+        gradient = QRadialGradient(0, 0, radius1/2)
+        if self.mouseBottomView:
+            gradient.setColorAt(0, self.bottomColorHover)
+            gradient.setColorAt(0.7, self.bottomColor)
+            gradient.setColorAt(1, self.bottomColor.darker(120))
+        else:
+            gradient.setColorAt(0, self.bottomColor.lighter(110))
+            gradient.setColorAt(0.7, self.bottomColor)
+            gradient.setColorAt(1, self.bottomColor.darker(110))
+
+        # 绘制图形
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(QBrush(gradient))
+        painter.drawPath(self.bottomBtnView)
+
+        # 添加边框效果
+        painter.setPen(QPen(self.bottomColor.lighter(150), 1))
+        painter.setBrush(Qt.NoBrush)
+        painter.drawPath(self.bottomBtnView)
         
-    #     # 绘制文字
-    #     painter.setPen(Qt.white)
-    #     painter.drawPath(textPath)
+        # 绘制文字
+        painter.setFont(font)
+        painter.setPen(QColor("#FFFFFF"))
+        painter.drawText(int(textX), int(textY), self.bottomText)
         
-    #     painter.restore()
+        painter.restore()
 
     def drawMidCircle(self, painter):
         """绘制中间按钮"""
@@ -1255,10 +1294,10 @@ class UIButton(QWidget):
         painter.scale(side/200.0, side/200.0)  # 坐标刻度缩放
 
         # 绘制各个部分
-        # self.drawOuterCircle(painter)  # 绘制顶部按钮
+        self.drawOuterCircle(painter)  # 绘制顶部按钮（一键返航）
         self.drawOuterPie(painter)     # 绘制右侧按钮
         self.drawInnerPie(painter)     # 绘制左侧按钮
-        # self.drawBottom(painter)       # 绘制底部按钮
+        self.drawBottom(painter)       # 绘制底部按钮（导入点云）
         self.drawMidCircle(painter)    # 绘制中间按钮
 
     def mouseMoveEvent(self, event):
@@ -1284,18 +1323,18 @@ class UIButton(QWidget):
                 self.setCursor(Qt.ArrowCursor)
                 self.update()
 
-        # # 底部按钮
-        # if self.bottomBtnView and self.bottomBtnView.contains(enterPoint):
-        #     if not self.mouseBottomView:
-        #         self.mouseBottomView = True
-        #         self.setCursor(Qt.PointingHandCursor)
-        #         self.setToolTip(self.bottomText)
-        #         self.update()
-        # else:
-        #     if self.mouseBottomView:
-        #         self.mouseBottomView = False
-        #         self.setCursor(Qt.ArrowCursor)
-        #         self.update()
+        # 底部按钮
+        if self.bottomBtnView and self.bottomBtnView.contains(enterPoint):
+            if not self.mouseBottomView:
+                self.mouseBottomView = True
+                self.setCursor(Qt.PointingHandCursor)
+                self.setToolTip(self.bottomText)
+                self.update()
+        else:
+            if self.mouseBottomView:
+                self.mouseBottomView = False
+                self.setCursor(Qt.ArrowCursor)
+                self.update()
 
         # 右侧按钮
         if self.rightBtnView and self.rightBtnView.contains(enterPoint):
@@ -1310,18 +1349,18 @@ class UIButton(QWidget):
                 self.setCursor(Qt.ArrowCursor)
                 self.update()
 
-        # # 顶部按钮
-        # if self.topBtnView and self.topBtnView.contains(enterPoint):
-        #     if not self.mouseTopView:
-        #         self.mouseTopView = True
-        #         self.setCursor(Qt.PointingHandCursor)
-        #         self.setToolTip(self.topText)
-        #         self.update()
-        # else:
-        #     if self.mouseTopView:
-        #         self.mouseTopView = False
-        #         self.setCursor(Qt.ArrowCursor)
-        #         self.update()
+        # 顶部按钮
+        if self.topBtnView and self.topBtnView.contains(enterPoint):
+            if not self.mouseTopView:
+                self.mouseTopView = True
+                self.setCursor(Qt.PointingHandCursor)
+                self.setToolTip(self.topText)
+                self.update()
+        else:
+            if self.mouseTopView:
+                self.mouseTopView = False
+                self.setCursor(Qt.ArrowCursor)
+                self.update()
 
         # 左侧按钮
         if self.leftBtnView and self.leftBtnView.contains(enterPoint):
@@ -1349,14 +1388,14 @@ class UIButton(QWidget):
         if self.centerBtnView and self.centerBtnView.contains(clickPoint):
             self.centerClicked.emit()
 
-        # if self.bottomBtnView and self.bottomBtnView.contains(clickPoint):
-        #     self.bottomClicked.emit()
+        if self.bottomBtnView and self.bottomBtnView.contains(clickPoint):
+            self.bottomClicked.emit()
 
         if self.rightBtnView and self.rightBtnView.contains(clickPoint):
             self.rightClicked.emit()
 
-        # if self.topBtnView and self.topBtnView.contains(clickPoint):
-        #     self.topClicked.emit()
+        if self.topBtnView and self.topBtnView.contains(clickPoint):
+            self.topClicked.emit()
 
         if self.leftBtnView and self.leftBtnView.contains(clickPoint):
             self.leftClicked.emit() 
