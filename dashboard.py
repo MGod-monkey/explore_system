@@ -1041,7 +1041,7 @@ class UIButton(QWidget):
         fm = QFontMetrics(font)
         textWidth = fm.horizontalAdvance(self.topText)
         textX = -textWidth / 2.0
-        textY = -radius1 * 0.28
+        textY = -radius1 * 0.28 - 8
  
         # 绘制小扇形
         radius = self.innerPieRadius
@@ -1170,7 +1170,7 @@ class UIButton(QWidget):
         fm = QFontMetrics(font)
         textWidth = fm.horizontalAdvance(self.bottomText)
         textX = -textWidth / 2.0
-        textY = radius1 * 0.32
+        textY = radius1 * 0.32 + 10
 
         # 绘制小扇形
         radius = self.innerPieRadius

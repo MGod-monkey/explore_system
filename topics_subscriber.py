@@ -89,6 +89,11 @@ class TopicsSubscriber:
                 "state": 0,  # FSM状态码
                 "state_name": "INIT",  # 状态名称
                 "timestamp": 0.0
+            },
+            "obstacle_states": {
+                "obstacles": [],  # 障碍物列表，每个包含 position, velocity, acceleration, size
+                "count": 0,  # 障碍物数量
+                "timestamp": 0.0
             }
         }
         
@@ -109,7 +114,8 @@ class TopicsSubscriber:
             "bird_view": False,
             "attitude": False,
             "rc_input": False,
-            "fsm_state": False
+            "fsm_state": False,
+            "obstacle_states": False
         }
         
         # 初始化cv_bridge
@@ -297,6 +303,26 @@ class TopicsSubscriber:
                     rospy.loginfo(f"成功订阅FSM状态话题: {self.config['fsm_state']['topic']}")
                 except Exception as e:
                     rospy.logerr(f"订阅FSM状态话题失败: {str(e)}")
+        
+        # 检查并订阅障碍物状态话题
+        obstacle_topic = self.config.get("obstacle_states", {}).get("topic", "")
+        if obstacle_topic and obstacle_topic in published_topics:
+            if "obstacle_states" not in self.subscribers or not self.subscribers["obstacle_states"]:
+                try:
+                    # 动态导入obj_state_msgs消息类型
+                    from obj_state_msgs.msg import ObjectsStates
+                    self.subscribers["obstacle_states"] = rospy.Subscriber(
+                        obstacle_topic,
+                        ObjectsStates,
+                        self.obstacle_states_callback
+                    )
+                    self.topics_active["obstacle_states"] = True
+                    rospy.loginfo(f"成功订阅障碍物状态话题: {obstacle_topic}")
+                except ImportError as e:
+                    rospy.logerr(f"导入obj_state_msgs失败: {str(e)}")
+                except Exception as e:
+                    rospy.logerr(f"订阅障碍物状态话题失败: {str(e)}")
+
     
     def battery_callback(self, msg):
         """电池状态话题回调函数"""
@@ -615,3 +641,53 @@ class TopicsSubscriber:
                         rospy.logerr(f"执行FSM状态回调函数时出错: {str(e)}")
         except Exception as e:
             rospy.logerr(f"处理FSM状态数据时出错: {str(e)}")
+    
+    def obstacle_states_callback(self, msg):
+        """处理障碍物状态数据"""
+        try:
+            obstacles = []
+            for state in msg.states:
+                obstacle = {
+                    "position": {
+                        "x": state.position.x,
+                        "y": state.position.y,
+                        "z": state.position.z
+                    },
+                    "velocity": {
+                        "x": state.velocity.x,
+                        "y": state.velocity.y,
+                        "z": state.velocity.z
+                    },
+                    "acceleration": {
+                        "x": state.acceleration.x,
+                        "y": state.acceleration.y,
+                        "z": state.acceleration.z
+                    },
+                    "size": {
+                        "x": state.size.x,
+                        "y": state.size.y,
+                        "z": state.size.z
+                    },
+                    # 计算速度和加速度的模
+                    "speed": math.sqrt(state.velocity.x**2 + state.velocity.y**2 + state.velocity.z**2),
+                    "accel": math.sqrt(state.acceleration.x**2 + state.acceleration.y**2 + state.acceleration.z**2)
+                }
+                obstacles.append(obstacle)
+            
+            # 更新障碍物状态数据
+            self.data["obstacle_states"]["obstacles"] = obstacles
+            self.data["obstacle_states"]["count"] = len(obstacles)
+            self.data["obstacle_states"]["timestamp"] = rospy.Time.now().to_sec()
+            
+            # 设置话题活跃状态
+            self.topics_active["obstacle_states"] = True
+            
+            # 触发注册的回调函数
+            if "obstacle_states" in self.callbacks:
+                for callback in self.callbacks["obstacle_states"]:
+                    try:
+                        callback(self.data["obstacle_states"])
+                    except Exception as e:
+                        rospy.logerr(f"执行障碍物状态回调函数时出错: {str(e)}")
+        except Exception as e:
+            rospy.logerr(f"处理障碍物状态数据时出错: {str(e)}")

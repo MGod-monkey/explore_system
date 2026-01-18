@@ -58,5 +58,11 @@
         "msg_type": "std_msgs/Int32",
         "description": "规划器状态机状态",
         "fields": ["data"]
+    },
+    "obstacle_states": {
+        "topic": "/onboard_detector/states",
+        "msg_type": "obj_state_msgs/ObjectsStates",
+        "description": "动态障碍物状态信息",
+        "fields": ["header", "states"]
     }
 }

@@ -256,6 +256,7 @@ class MyViz(QMainWindow):
         bird_view_data_signal = pyqtSignal(dict)
         marker_update_signal = pyqtSignal(dict)
         attitude_update_signal = pyqtSignal(dict)
+        obstacle_update_signal = pyqtSignal(dict)
 
     def __init__(self):
         super(MyViz, self).__init__()
@@ -292,6 +293,7 @@ class MyViz(QMainWindow):
             self.bird_view_data_signal.connect(self.updateBirdViewImage)
             self.marker_update_signal.connect(self.marker_callback)
             self.attitude_update_signal.connect(self.updateAttitudeDisplay)
+            self.obstacle_update_signal.connect(self.updateObstacleTable)
 
         # 延迟初始化话题订阅器
         QTimer.singleShot(2000, self.setupTopicSubscriber)
@@ -370,6 +372,14 @@ class MyViz(QMainWindow):
             self.attitude_update_signal.emit(attitude_data)
         else:
             QTimer.singleShot(0, lambda: self.updateAttitudeDisplay(attitude_data))
+    
+    def _thread_safe_obstacle_callback(self, obstacle_data):
+        """线程安全的障碍物状态回调"""
+        if pyqtSignal is not None and hasattr(self, 'obstacle_update_signal'):
+            self.obstacle_update_signal.emit(obstacle_data)
+        else:
+            QTimer.singleShot(0, lambda d=obstacle_data: self.updateObstacleTable(d))
+
 
     def _init_basic_attributes(self):
         """初始化基本属性"""
@@ -1416,19 +1426,19 @@ class MyViz(QMainWindow):
         # 减少顶部弹性空间，让表格区域有更多空间
         right_sidebar_layout.addSpacing(10)
         
-        # 添加待搜索人员位置窗口
-        person_position_group = QGroupBox("📍 待搜索人员位置")
-        person_position_group.setStyleSheet("""
+        # 添加动态障碍物跟踪信息窗口
+        obstacle_tracking_group = QGroupBox("🎯 动态障碍物跟踪信息")
+        obstacle_tracking_group.setStyleSheet("""
             QGroupBox {
-                color: #3498DB;
+                color: #E67E22;
                 font-size: 16pt;
                 font-weight: bold;
-                border: 2px solid #3498DB;
+                border: 2px solid #E67E22;
                 border-radius: 12px;
                 padding: 15px;
                 margin-top: 20px;
                 background: qlineargradient(x1:0, y1:0, x2:0, y2:1,
-                    stop:0 rgba(52, 152, 219, 0.1),
+                    stop:0 rgba(230, 126, 34, 0.1),
                     stop:1 rgba(26, 32, 44, 0.8));
             }
             QGroupBox::title {
@@ -1438,129 +1448,69 @@ class MyViz(QMainWindow):
                 background-color: #1E2330;
                 border-radius: 6px;
             }
-        """)  # 设置标题样式
+        """)
         # 设置大小策略为垂直方向可扩展
-        person_position_group.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
-        person_position_layout = QVBoxLayout(person_position_group)
-        person_position_layout.setContentsMargins(0, 0, 0, 0)  # 进一步减少内边距
-        person_position_layout.setSpacing(3)  # 进一步减少组件间距以节省空间
+        obstacle_tracking_group.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Expanding)
+        obstacle_tracking_layout = QVBoxLayout(obstacle_tracking_group)
+        obstacle_tracking_layout.setContentsMargins(0, 0, 0, 0)
+        obstacle_tracking_layout.setSpacing(3)
         
-        # 创建位置显示区域
-        position_frame = QFrame()
-        position_frame.setFrameShape(QFrame.StyledPanel)
-        position_frame.setStyleSheet("background-color: #1A202C; border-radius: 10px; border: 1px solid #3498DB;")
-        # 设置Frame可扩展
-        position_frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        position_frame_layout = QVBoxLayout(position_frame)
-        position_frame_layout.setContentsMargins(0, 0, 0, 0)  # 进一步减少内边距
+        # 创建障碍物信息显示区域
+        obstacle_frame = QFrame()
+        obstacle_frame.setFrameShape(QFrame.StyledPanel)
+        obstacle_frame.setStyleSheet("background-color: #1A202C; border-radius: 10px; border: 1px solid #E67E22;")
+        obstacle_frame.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        obstacle_frame_layout = QVBoxLayout(obstacle_frame)
+        obstacle_frame_layout.setContentsMargins(0, 0, 0, 0)
         
-        # 创建位置信息表格
-        self.position_table = QTableWidget()
-        self.position_table.setColumnCount(5)  # 增加一列用于截图
-        self.position_table.setHorizontalHeaderLabels(["ID", "X坐标", "Y坐标", "状态", "截图"])
-        # 添加表格单元格点击事件
-        self.position_table.cellClicked.connect(self.on_position_table_cell_clicked)
-        self.position_table.setStyleSheet("""
+        # 创建障碍物信息表格
+        self.obstacle_table = QTableWidget()
+        self.obstacle_table.setColumnCount(4)
+        self.obstacle_table.setHorizontalHeaderLabels(["ID", "距离(m)", "速度(m/s)", "加速度(m/s²)"])
+        self.obstacle_table.setStyleSheet("""
             QTableWidget {
                 background-color: #1E2330;
                 color: white;
-                gridline-color: #3498DB;
+                gridline-color: #E67E22;
                 border: none;
+                font-size: 10pt;
             }
             QHeaderView::section {
                 background-color: #2C3E50;
                 color: white;
-                padding: 0px;
-                border: 1px solid #3498DB;
+                padding: 5px;
+                border: 1px solid #E67E22;
+                font-weight: bold;
             }
             QTableWidget::item {
-                border-bottom: 1px solid #3498DB;
-                padding: 0px;
+                border-bottom: 1px solid #E67E22;
+                padding: 3px;
             }
             QTableWidget::item:selected {
-                background-color: #3498DB;
+                background-color: #E67E22;
             }
         """)
-        # 设置表格列宽策略，避免横向滚动条
-        self.setupTableColumnWidths()
-        self.position_table.verticalHeader().setVisible(False)
-        # 设置表格可扩展，减少最小高度以更好填充空间
-        self.position_table.setMinimumHeight(100)
-        # 不设置最大高度限制，允许根据可用空间自动调整
-        self.position_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        # 禁用横向滚动条
-        self.position_table.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        # 设置表格列宽自适应
+        header = self.obstacle_table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.Stretch)
+        self.obstacle_table.verticalHeader().setVisible(False)
+        self.obstacle_table.setMinimumHeight(100)
+        self.obstacle_table.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
+        self.obstacle_table.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.obstacle_table.setEditTriggers(QAbstractItemView.NoEditTriggers)
         
         # 将表格初始化为空
-        self.position_table.setRowCount(0)
+        self.obstacle_table.setRowCount(0)
         
-        # 添加表格到位置框架
-        position_frame_layout.addWidget(self.position_table)
+        # 添加表格到障碍物框架
+        obstacle_frame_layout.addWidget(self.obstacle_table)
         
-        # 添加操作按钮区域
-        button_container = QWidget()
-        button_layout = QHBoxLayout(button_container)
-        button_layout.setContentsMargins(0, 0, 0, 0)  # 减少顶部边距
-        button_layout.setSpacing(3)  # 进一步减少按钮间距
+        # 添加障碍物框架到组
+        obstacle_tracking_layout.addWidget(obstacle_frame)
         
-        # 添加按钮
-        add_btn = QPushButton("添加")
-        add_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #2980B9;
-                color: white;
-                border-radius: 4px;
-                padding: 5px 15px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #3498DB;
-            }
-        """)
-        add_btn.clicked.connect(self.addPerson)
-        
-        remove_btn = QPushButton("删除")
-        remove_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #C0392B;
-                color: white;
-                border-radius: 4px;
-                padding: 5px 15px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #E74C3C;
-            }
-        """)
-        remove_btn.clicked.connect(self.removePerson)
-        
-        update_btn = QPushButton("更新状态")
-        update_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #27AE60;
-                color: white;
-                border-radius: 4px;
-                padding: 5px 15px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #2ECC71;
-            }
-        """)
-        update_btn.clicked.connect(self.updatePersonStatus)
-        
-        button_layout.addWidget(add_btn)
-        button_layout.addWidget(remove_btn)
-        button_layout.addWidget(update_btn)
-        
-        # 添加按钮容器到位置框架
-        position_frame_layout.addWidget(button_container)
-        
-        # 添加位置框架到位置组
-        person_position_layout.addWidget(position_frame)
-        
-        # 添加位置组到右侧栏，并给予较大的拉伸系数
-        right_sidebar_layout.addWidget(person_position_group, 2)  # 拉伸系数为2，表示会占用较多可用空间
+        # 添加障碍物组到右侧栏
+        right_sidebar_layout.addWidget(obstacle_tracking_group, 2)
+
         
         # 在底部添加图像显示区域和控制按钮
         image_display_container = QWidget()
@@ -3483,6 +3433,73 @@ class MyViz(QMainWindow):
                     self.attitude_indicator.update_attitude(self.pitch, self.roll)
         except Exception as e:
             print(f"更新姿态显示时出错: {str(e)}")
+    
+    def updateObstacleTable(self, obstacle_data=None):
+        """更新障碍物跟踪表格"""
+        try:
+            if not hasattr(self, 'obstacle_table'):
+                return
+            
+            # 获取障碍物数据
+            obstacles = []
+            if obstacle_data:
+                obstacles = obstacle_data.get("obstacles", [])
+            elif self.topic_subscriber and self.topic_subscriber.is_topic_active("obstacle_states"):
+                data = self.topic_subscriber.get_data("obstacle_states")
+                if data:
+                    obstacles = data.get("obstacles", [])
+            
+            # 获取无人机当前位置用于计算距离
+            drone_pos = {"x": 0.0, "y": 0.0, "z": 0.0}
+            if self.topic_subscriber and self.topic_subscriber.is_topic_active("odometry"):
+                odom_data = self.topic_subscriber.get_data("odometry")
+                if odom_data and "position" in odom_data:
+                    drone_pos = odom_data["position"]
+            
+            # 更新表格
+            self.obstacle_table.setRowCount(len(obstacles))
+            
+            for i, obs in enumerate(obstacles):
+                # 计算距离
+                obs_pos = obs.get("position", {"x": 0, "y": 0, "z": 0})
+                dx = obs_pos["x"] - drone_pos["x"]
+                dy = obs_pos["y"] - drone_pos["y"]
+                dz = obs_pos["z"] - drone_pos["z"]
+                distance = (dx**2 + dy**2 + dz**2) ** 0.5
+                
+                # 获取速度和加速度
+                speed = obs.get("speed", 0.0)
+                accel = obs.get("accel", 0.0)
+                
+                # ID列
+                id_item = QTableWidgetItem(str(i + 1))
+                id_item.setTextAlignment(Qt.AlignCenter)
+                self.obstacle_table.setItem(i, 0, id_item)
+                
+                # 距离列
+                dist_item = QTableWidgetItem(f"{distance:.2f}")
+                dist_item.setTextAlignment(Qt.AlignCenter)
+                # 根据距离设置颜色
+                if distance < 2.0:
+                    dist_item.setForeground(QColor("#E74C3C"))  # 红色 - 危险
+                elif distance < 5.0:
+                    dist_item.setForeground(QColor("#F39C12"))  # 橙色 - 警告
+                else:
+                    dist_item.setForeground(QColor("#2ECC71"))  # 绿色 - 安全
+                self.obstacle_table.setItem(i, 1, dist_item)
+                
+                # 速度列
+                speed_item = QTableWidgetItem(f"{speed:.2f}")
+                speed_item.setTextAlignment(Qt.AlignCenter)
+                self.obstacle_table.setItem(i, 2, speed_item)
+                
+                # 加速度列
+                accel_item = QTableWidgetItem(f"{accel:.2f}")
+                accel_item.setTextAlignment(Qt.AlignCenter)
+                self.obstacle_table.setItem(i, 3, accel_item)
+                
+        except Exception as e:
+            print(f"更新障碍物表格时出错: {str(e)}")
             
     def toggleLogWindow(self):
         """显示或隐藏日志窗口"""
@@ -3771,6 +3788,7 @@ class MyViz(QMainWindow):
             self.topic_subscriber.register_callback("bird_view", self._thread_safe_bird_view_callback)
             self.topic_subscriber.register_callback("marker", self._thread_safe_marker_callback)
             self.topic_subscriber.register_callback("attitude", self._thread_safe_attitude_callback)
+            self.topic_subscriber.register_callback("obstacle_states", self._thread_safe_obstacle_callback)
             
             # 注意：已移除MAVROS话题回调，使用普通话题替代
             
