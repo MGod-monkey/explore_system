@@ -102,139 +102,15 @@ except ImportError:
 # RViz导入
 from rviz import bindings as rviz
 
-# 路径工具函数
-def get_application_directory():
-    """
-    获取应用程序目录，兼容打包和非打包环境
-    在打包环境下，返回可执行文件所在目录
-    在开发环境下，返回脚本文件所在目录
-    """
-    if getattr(sys, 'frozen', False):
-        # 打包环境：使用可执行文件所在目录
-        application_path = os.path.dirname(sys.executable)
-    else:
-        # 开发环境：使用脚本文件所在目录
-        application_path = os.path.dirname(os.path.abspath(__file__))
+# 导入工具函数和常量
+from utils import (
+    get_application_directory, 
+    get_data_directory, 
+    get_config_file_path,
+    PROCESS_PATTERNS,
+    GLOBAL_STYLES
+)
 
-    return application_path
-
-def get_data_directory(subdir_name):
-    """
-    获取数据目录（截图、日志等），确保在用户可写的位置
-    优先使用程序目录，如果不可写则使用用户主目录
-    """
-    app_dir = get_application_directory()
-    data_dir = os.path.join(app_dir, subdir_name)
-
-    # 检查程序目录是否可写
-    try:
-        # 尝试在程序目录创建测试文件
-        test_file = os.path.join(app_dir, '.write_test')
-        with open(test_file, 'w') as f:
-            f.write('test')
-        os.remove(test_file)
-
-        # 如果可写，使用程序目录
-        if not os.path.exists(data_dir):
-            os.makedirs(data_dir)
-        return data_dir
-
-    except (OSError, PermissionError):
-        # 如果程序目录不可写，使用用户主目录
-        user_data_dir = os.path.expanduser(f"~/drone_search_system/{subdir_name}")
-        if not os.path.exists(user_data_dir):
-            os.makedirs(user_data_dir)
-        print(f"程序目录不可写，使用用户目录: {user_data_dir}")
-        return user_data_dir
-
-def get_config_file_path(filename):
-    """
-    获取配置文件路径，优先使用程序目录，如果不存在则使用用户目录
-    """
-    app_dir = get_application_directory()
-    config_path = os.path.join(app_dir, filename)
-
-    if os.path.exists(config_path):
-        return config_path
-
-    # 如果程序目录没有配置文件，检查用户目录
-    user_config_path = os.path.expanduser(f"~/drone_search_system/{filename}")
-    if os.path.exists(user_config_path):
-        return user_config_path
-
-    # 如果都不存在，返回程序目录路径（用于创建新文件）
-    return config_path
-
-# 全局常量
-PROCESS_PATTERNS = [
-    "roslaunch px4ctrl run_node.launch",
-    "rqt_reconfigure",
-    "roslaunch dynamic_predictor predictor_with_fake_detector.launch",
-    "roslaunch ego_planner single_run_in_gazebo.launch",
-]
-
-# 全局样式常量
-GLOBAL_STYLES = {
-    'main_window': """
-        QWidget {
-            background-color: #1E2330;
-            color: #FFFFFF;
-        }
-        QMainWindow::title {
-            height: 35px;
-        }
-        QToolBar {
-            background-color: #1A202C;
-            border: none;
-            spacing: 10px;
-            padding: 5px;
-        }
-        QStatusBar {
-            background-color: #1A202C;
-            color: #FFFFFF;
-        }
-    """,
-    'button_primary': """
-        QPushButton {{
-            background-color: #2C3E50;
-            color: #FFFFFF;
-            border: none;
-            border-radius: 4px;
-            padding: 6px 12px;
-            font-weight: bold;
-            min-width: {min_width}px;
-            min-height: {min_height}px;
-        }}
-        QPushButton:hover {{
-            background-color: #3498DB;
-        }}
-        QPushButton:pressed {{
-            background-color: #2980B9;
-        }}
-    """,
-    'groupbox': """
-        QGroupBox {
-            color: #3498DB;
-            font-weight: bold;
-            border: 1px solid #3498DB;
-            border-radius: 5px;
-            padding: 10px;
-            margin-top: 10px;
-        }
-        QGroupBox::title {
-            subcontrol-origin: margin;
-            subcontrol-position: top center;
-            padding: 0 5px;
-        }
-    """,
-    'label': """
-        QLabel {
-            font-size: 12pt;
-            font-weight: bold;
-            padding: 5px;
-        }
-    """
-}
 
 class MyViz(QMainWindow):
     """无人机自主导航系统主窗口类"""
@@ -3463,110 +3339,85 @@ class MyViz(QMainWindow):
             self.log_button.setChecked(False)
 
     def startDroneSystem(self):
-        """启动无人机导航系统"""
+        """启动无人机导航系统 - 使用配置文件驱动"""
         try:
-            # 创建日志目录 - 使用新的路径工具函数
-            log_dir = get_data_directory("log")
+            # 加载进程配置
+            from utils import load_processes_config
+            config = load_processes_config()
+            processes_list = config.get('processes', [])
+            
+            if not processes_list:
+                QMessageBox.warning(self, "配置错误", "进程配置为空，请检查 processes_config.json")
+                return
+            
+            # 创建日志目录
+            log_dir_name = config.get('log_directory', 'log')
+            log_dir = get_data_directory(log_dir_name)
             timestamp = time.strftime("%Y%m%d_%H%M%S")
             
-            # 显示正在启动的消息
+            # 获取工作空间路径
+            catkin_ws = os.path.expanduser(config.get('catkin_workspace', '~/catkin_ws_dyn'))
+            
+            # 显示进度对话框
             progress_dialog = QProgressDialog("正在启动无人机导航系统，请稍候...", "取消", 0, 100, self)
             progress_dialog.setWindowTitle("系统启动")
             progress_dialog.setWindowModality(Qt.WindowModal)
-            progress_dialog.setCancelButton(None)  # 禁用取消按钮
+            progress_dialog.setCancelButton(None)
             progress_dialog.setValue(0)
             progress_dialog.show()
             QApplication.processEvents()
             
-            # 定义工作空间路径
-            catkin_ws = os.path.expanduser("~/catkin_ws_dyn")
-            
-            # 初始化日志文件字典
+            # 初始化
             self.log_files = {}
+            total_processes = len(processes_list)
+            progress_per_process = 90 // total_processes  # 预留10%给最终完成
             
-            # ===== 步骤1: 启动 px4ctrl =====
-            progress_dialog.setLabelText("正在启动 px4ctrl...")
-            progress_dialog.setValue(10)
-            QApplication.processEvents()
-            
-            px4ctrl_log = f"{log_dir}/px4ctrl_{timestamp}.log"
-            self.log_files["px4ctrl"] = px4ctrl_log
-            print(f"px4ctrl 日志文件: {px4ctrl_log}")
-            
-            cmd1 = f"cd {catkin_ws} && source {catkin_ws}/devel/setup.bash && roslaunch px4ctrl run_node.launch"
-            with open(px4ctrl_log, 'w') as log_file:
-                px4ctrl_process = subprocess.Popen(cmd1, shell=True, stdout=log_file, stderr=log_file, 
-                                        executable='/bin/bash', text=True)
-            self.processes["px4ctrl"] = px4ctrl_process
-            
-            # 等待5秒
-            for i in range(5):
-                progress_dialog.setLabelText(f"正在启动 px4ctrl...（等待 {5-i} 秒）")
-                progress_dialog.setValue(10 + i * 4)
+            # 依次启动每个进程
+            for idx, proc_config in enumerate(processes_list):
+                proc_name = proc_config.get('name', f'process_{idx}')
+                display_name = proc_config.get('display_name', proc_name)
+                start_cmd = proc_config.get('start_command', '')
+                wait_seconds = proc_config.get('wait_seconds', 5)
+                
+                if not start_cmd:
+                    print(f"警告: 进程 {proc_name} 没有配置启动命令，跳过")
+                    continue
+                
+                # 计算进度
+                base_progress = idx * progress_per_process
+                
+                # 更新进度显示
+                progress_dialog.setLabelText(f"正在启动 {display_name}...")
+                progress_dialog.setValue(base_progress)
                 QApplication.processEvents()
-                time.sleep(1)
-            
-            # ===== 步骤2: 启动 rqt_reconfigure =====
-            progress_dialog.setLabelText("正在启动 rqt_reconfigure...")
-            progress_dialog.setValue(30)
-            QApplication.processEvents()
-            
-            rqt_log = f"{log_dir}/rqt_reconfigure_{timestamp}.log"
-            self.log_files["rqt_reconfigure"] = rqt_log
-            print(f"rqt_reconfigure 日志文件: {rqt_log}")
-            
-            cmd2 = f"source {catkin_ws}/devel/setup.bash && rosrun rqt_reconfigure rqt_reconfigure"
-            with open(rqt_log, 'w') as log_file:
-                rqt_process = subprocess.Popen(cmd2, shell=True, stdout=log_file, stderr=log_file, 
-                                        executable='/bin/bash', text=True)
-            self.processes["rqt_reconfigure"] = rqt_process
-            
-            # 等待5秒
-            for i in range(5):
-                progress_dialog.setLabelText(f"正在启动 rqt_reconfigure...（等待 {5-i} 秒）")
-                progress_dialog.setValue(30 + i * 4)
-                QApplication.processEvents()
-                time.sleep(1)
-            
-            # ===== 步骤3: 启动 dynamic_predictor =====
-            progress_dialog.setLabelText("正在启动 dynamic_predictor...")
-            progress_dialog.setValue(50)
-            QApplication.processEvents()
-            
-            predictor_log = f"{log_dir}/dynamic_predictor_{timestamp}.log"
-            self.log_files["dynamic_predictor"] = predictor_log
-            print(f"dynamic_predictor 日志文件: {predictor_log}")
-            
-            cmd3 = f"cd {catkin_ws} && source {catkin_ws}/devel/setup.bash && roslaunch dynamic_predictor predictor_with_fake_detector.launch"
-            with open(predictor_log, 'w') as log_file:
-                predictor_process = subprocess.Popen(cmd3, shell=True, stdout=log_file, stderr=log_file, 
-                                        executable='/bin/bash', text=True)
-            self.processes["dynamic_predictor"] = predictor_process
-            
-            # 等待10秒
-            for i in range(10):
-                progress_dialog.setLabelText(f"正在启动 dynamic_predictor...（等待 {10-i} 秒）")
-                progress_dialog.setValue(50 + i * 3)
-                QApplication.processEvents()
-                time.sleep(1)
-            
-            # ===== 步骤4: 启动 ego_planner =====
-            progress_dialog.setLabelText("正在启动 ego_planner...")
-            progress_dialog.setValue(80)
-            QApplication.processEvents()
-            
-            planner_log = f"{log_dir}/ego_planner_{timestamp}.log"
-            self.log_files["ego_planner"] = planner_log
-            print(f"ego_planner 日志文件: {planner_log}")
-            
-            cmd4 = f"cd {catkin_ws} && source {catkin_ws}/devel/setup.bash && roslaunch ego_planner single_run_in_gazebo.launch"
-            with open(planner_log, 'w') as log_file:
-                planner_process = subprocess.Popen(cmd4, shell=True, stdout=log_file, stderr=log_file, 
-                                        executable='/bin/bash', text=True)
-            self.processes["ego_planner"] = planner_process
-            
-            # 短暂等待确认启动
-            time.sleep(2)
+                
+                # 创建日志文件
+                log_file_path = f"{log_dir}/{proc_name}_{timestamp}.log"
+                self.log_files[proc_name] = log_file_path
+                print(f"{proc_name} 日志文件: {log_file_path}")
+                
+                # 构建完整命令（添加工作空间和source）
+                full_cmd = f"cd {catkin_ws} && source {catkin_ws}/devel/setup.bash && {start_cmd}"
+                
+                # 启动进程
+                with open(log_file_path, 'w') as log_file:
+                    process = subprocess.Popen(
+                        full_cmd, 
+                        shell=True, 
+                        stdout=log_file, 
+                        stderr=log_file,
+                        executable='/bin/bash', 
+                        text=True
+                    )
+                self.processes[proc_name] = process
+                
+                # 等待指定时间
+                for i in range(wait_seconds):
+                    progress_dialog.setLabelText(f"正在启动 {display_name}...（等待 {wait_seconds - i} 秒）")
+                    wait_progress = base_progress + (i * progress_per_process // wait_seconds)
+                    progress_dialog.setValue(min(wait_progress, 90))
+                    QApplication.processEvents()
+                    time.sleep(1)
             
             # 完成启动
             progress_dialog.setValue(100)
@@ -3576,12 +3427,20 @@ class MyViz(QMainWindow):
             progress_dialog.close()
             
             # 显示成功消息
-            QMessageBox.information(self, "启动完成", f"无人机导航系统已启动！\n\n所有日志文件保存在:\n{log_dir}")
+            started_count = len([p for p in self.processes.values() if p is not None])
+            QMessageBox.information(
+                self, "启动完成", 
+                f"无人机导航系统已启动！\n\n"
+                f"启动了 {started_count} 个进程\n"
+                f"所有日志文件保存在:\n{log_dir}"
+            )
             
         except Exception as e:
             if 'progress_dialog' in locals() and progress_dialog is not None:
                 progress_dialog.close()
             QMessageBox.critical(self, "启动错误", f"启动无人机导航系统时出错: {str(e)}")
+    
+
     
 
     def monitorAllProcesses(self):

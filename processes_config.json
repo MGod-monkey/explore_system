@@ -1,0 +1,38 @@
+{
+    "catkin_workspace": "~/catkin_ws_dyn",
+    "log_directory": "log",
+    "processes": [
+        {
+            "name": "px4ctrl",
+            "display_name": "PX4 飞控控制器",
+            "start_command": "roslaunch px4ctrl run_node.launch",
+            "stop_pattern": "roslaunch px4ctrl run_node.launch",
+            "wait_seconds": 5,
+            "order": 1
+        },
+        {
+            "name": "rqt_reconfigure",
+            "display_name": "ROS 参数配置工具",
+            "start_command": "rosrun rqt_reconfigure rqt_reconfigure",
+            "stop_pattern": "rqt_reconfigure",
+            "wait_seconds": 5,
+            "order": 2
+        },
+        {
+            "name": "dynamic_predictor",
+            "display_name": "动态障碍物预测器",
+            "start_command": "roslaunch dynamic_predictor predictor_with_fake_detector.launch",
+            "stop_pattern": "roslaunch dynamic_predictor predictor_with_fake_detector.launch",
+            "wait_seconds": 10,
+            "order": 3
+        },
+        {
+            "name": "ego_planner",
+            "display_name": "EGO 路径规划器",
+            "start_command": "roslaunch ego_planner single_run_in_gazebo.launch",
+            "stop_pattern": "roslaunch ego_planner single_run_in_gazebo.launch",
+            "wait_seconds": 2,
+            "order": 4
+        }
+    ]
+}
