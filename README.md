@@ -27,6 +27,8 @@ python3 start.py
 ```
 explore_system/
 ├── start.py                    # 主程序入口
+├── utils.py                   # 工具函数和常量 (新)
+├── processes_config.json      # 进程配置文件 (新)
 ├── dashboard.py               # 控制中心UI组件
 ├── topics_subscriber.py       # ROS话题订阅器
 ├── topic_logger.py           # 话题日志记录器
@@ -85,18 +87,27 @@ explore_system/
 
 ### 2. 修改 RViz 配置 (`my_config.rviz`)
 
-根据您的需求修改 RViz 显示项：
+将您项目的 RViz 配置文件保存（例如 `your_project.rviz`），并用它替换本项目中的 `my_config.rviz` 文件。
 
-- Fixed Frame: 修改为您的世界坐标系 (如 `world`)
-- 添加您需要的 Display (如 TF、Path、PointCloud2 等)
+### 3. 修改进程配置 (`processes_config.json`)
 
-### 3. 修改启动命令 (`start.py`)
+系统启动和停止的进程现在通过配置文件进行管理。请修改 `processes_config.json`：
 
-在 `startDroneSystem()` 函数中修改导航系统启动命令：
-
-```python
-# 查找 PROCESS_PATTERNS 列表，根据您的启动流程修改
-# 查找 startDroneSystem 函数，修改 roslaunch 命令
+```json
+{
+  "catkin_workspace": "~/catkin_ws_dyn", // 工作空间路径
+  "log_directory": "log", // 日志保存目录
+  "processes": [
+    {
+      "name": "px4ctrl",
+      "display_name": "PX4 飞控控制器",
+      "start_command": "roslaunch px4ctrl run_node.launch", // 启动命令
+      "wait_seconds": 5, // 启动后等待时间
+      "order": 1 // 启动顺序
+    }
+    // ... 其他进程
+  ]
+}
 ```
 
 ### 4. 修改目标点发布话题
