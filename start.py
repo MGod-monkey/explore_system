@@ -3350,6 +3350,9 @@ class MyViz(QMainWindow):
                 QMessageBox.warning(self, "配置错误", "进程配置为空，请检查 processes_config.json")
                 return
             
+            # 获取日志保存配置
+            save_log = config.get('save_log', True)
+            
             # 创建日志目录
             log_dir_name = config.get('log_directory', 'log')
             log_dir = get_data_directory(log_dir_name)
@@ -3391,24 +3394,36 @@ class MyViz(QMainWindow):
                 progress_dialog.setValue(base_progress)
                 QApplication.processEvents()
                 
-                # 创建日志文件
-                log_file_path = f"{log_dir}/{proc_name}_{timestamp}.log"
-                self.log_files[proc_name] = log_file_path
-                print(f"{proc_name} 日志文件: {log_file_path}")
-                
                 # 构建完整命令（添加工作空间和source）
                 full_cmd = f"cd {catkin_ws} && source {catkin_ws}/devel/setup.bash && {start_cmd}"
                 
                 # 启动进程
-                with open(log_file_path, 'w') as log_file:
+                if save_log:
+                    # 创建日志文件
+                    log_file_path = f"{log_dir}/{proc_name}_{timestamp}.log"
+                    self.log_files[proc_name] = log_file_path
+                    print(f"{proc_name} 日志文件: {log_file_path}")
+                    
+                    with open(log_file_path, 'w') as log_file:
+                        process = subprocess.Popen(
+                            full_cmd, 
+                            shell=True, 
+                            stdout=log_file, 
+                            stderr=log_file,
+                            executable='/bin/bash', 
+                            text=True
+                        )
+                else:
+                    # 不保存日志，也不输出到终端（丢弃输出）
                     process = subprocess.Popen(
                         full_cmd, 
                         shell=True, 
-                        stdout=log_file, 
-                        stderr=log_file,
+                        stdout=subprocess.DEVNULL, 
+                        stderr=subprocess.DEVNULL,
                         executable='/bin/bash', 
                         text=True
                     )
+                    
                 self.processes[proc_name] = process
                 
                 # 等待指定时间
@@ -3428,12 +3443,14 @@ class MyViz(QMainWindow):
             
             # 显示成功消息
             started_count = len([p for p in self.processes.values() if p is not None])
-            QMessageBox.information(
-                self, "启动完成", 
-                f"无人机导航系统已启动！\n\n"
-                f"启动了 {started_count} 个进程\n"
-                f"所有日志文件保存在:\n{log_dir}"
-            )
+            
+            msg = f"无人机导航系统已启动！\n\n启动了 {started_count} 个进程\n"
+            if save_log:
+                msg += f"所有日志文件保存在:\n{log_dir}"
+            else:
+                msg += "日志未保存（已禁用）"
+                
+            QMessageBox.information(self, "启动完成", msg)
             
         except Exception as e:
             if 'progress_dialog' in locals() and progress_dialog is not None:

@@ -108,6 +108,7 @@ def get_default_processes_config():
     """返回默认的进程配置（当配置文件不存在时使用）"""
     return {
         "catkin_workspace": "~/catkin_ws_dyn",
+        "save_log": True,
         "log_directory": "log",
         "processes": [
             {

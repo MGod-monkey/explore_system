@@ -1,5 +1,6 @@
 {
     "catkin_workspace": "~/catkin_ws_dyn",
+    "save_log": true,
     "log_directory": "log",
     "processes": [
         {
