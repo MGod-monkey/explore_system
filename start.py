@@ -254,7 +254,6 @@ class MyViz(QMainWindow):
         camera_update_signal = pyqtSignal(dict)
         depth_update_signal = pyqtSignal(dict)
         bird_view_data_signal = pyqtSignal(dict)
-        marker_update_signal = pyqtSignal(dict)
         attitude_update_signal = pyqtSignal(dict)
         obstacle_update_signal = pyqtSignal(dict)
 
@@ -291,7 +290,6 @@ class MyViz(QMainWindow):
             self.camera_update_signal.connect(self.updateCameraImage)
             self.depth_update_signal.connect(self.updateDepthImage)
             self.bird_view_data_signal.connect(self.updateBirdViewImage)
-            self.marker_update_signal.connect(self.marker_callback)
             self.attitude_update_signal.connect(self.updateAttitudeDisplay)
             self.obstacle_update_signal.connect(self.updateObstacleTable)
 
@@ -359,12 +357,7 @@ class MyViz(QMainWindow):
         else:
             QTimer.singleShot(0, lambda: self.updateBirdViewImage(bird_view_data))
 
-    def _thread_safe_marker_callback(self, marker_data):
-        """线程安全的标记点回调"""
-        if pyqtSignal is not None and hasattr(self, 'marker_update_signal'):
-            self.marker_update_signal.emit(marker_data)
-        else:
-            QTimer.singleShot(0, lambda: self.marker_callback(marker_data))
+
 
     def _thread_safe_attitude_callback(self, attitude_data):
         """线程安全的姿态回调"""
@@ -405,11 +398,10 @@ class MyViz(QMainWindow):
         self.linear_speed = 0
         self.angular_speed = 0
 
+
         # 状态变量
-        self.detected_markers = set()
         self.topics_with_data = defaultdict(bool)
         self.current_image_mode = "rgb"
-        self.ball_screenshots = {}
 
         # UI状态变量 - 启动时左右侧栏都是隐藏且未锁定状态
         self.sidebar_expanded = False  # 左侧栏开始隐藏
@@ -1929,65 +1921,10 @@ class MyViz(QMainWindow):
             # 更新按钮样式以适应新宽度
             self.updateButtonStyles(button_width)
 
+
         print(f"更新图像尺寸 - 图像: {self.adaptive_image_width}x{self.adaptive_image_height}px, 鸟瞰图: {self.adaptive_image_width}x{self.adaptive_bird_height}px")
 
-        # 同时更新表格列宽
-        if hasattr(self, 'position_table'):
-            self.setupTableColumnWidths()
 
-    def setupTableColumnWidths(self):
-        """设置表格列宽，前4列等宽，最后一列拉伸填充"""
-        if not hasattr(self, 'position_table') or not hasattr(self, 'right_sidebar'):
-            return
-
-        # 获取右侧栏的实际宽度
-        sidebar_width = self.right_sidebar.width() if self.right_sidebar.isVisible() else self.adaptive_right_width
-
-        # 计算表格可用宽度（减去边距、边框和滚动条）
-        available_width = sidebar_width - 50  # 减去左右边距、边框和可能的滚动条
-
-        # 计算前4列的统一宽度
-        # 为最后一列预留合理宽度，剩余空间平均分配给前4列
-        min_last_column_width = 80   # 截图列最小宽度
-        max_last_column_width = 150  # 截图列最大宽度，避免过度拉伸
-
-        # 计算理想的最后一列宽度
-        ideal_last_column_width = min(max_last_column_width, max(min_last_column_width, available_width * 0.25))
-
-        # 计算前4列可用的总宽度
-        width_for_first_4_columns = available_width - ideal_last_column_width
-
-        # 确保有足够空间
-        if width_for_first_4_columns < 200:  # 如果空间太小
-            # 紧凑模式：前4列使用更小的统一宽度
-            uniform_width = max(35, width_for_first_4_columns // 4)
-            # 重新计算最后一列宽度
-            actual_last_column_width = available_width - uniform_width * 4
-            min_last_column_width = max(60, actual_last_column_width)
-        else:
-            # 正常模式：前4列使用合适的统一宽度
-            uniform_width = max(50, min(75, width_for_first_4_columns // 4))
-            # 重新计算实际的最后一列宽度
-            actual_last_column_width = available_width - uniform_width * 4
-
-        # 设置列宽数组：前4列等宽，最后一列拉伸
-        column_widths = [uniform_width] * 4  # 前4列：ID, X坐标, Y坐标, 状态
-
-        # 设置各列的宽度和调整模式
-        header = self.position_table.horizontalHeader()
-
-        # 前4列设置为固定宽度且等宽
-        for i in range(4):
-            header.setSectionResizeMode(i, QHeaderView.Fixed)
-            self.position_table.setColumnWidth(i, uniform_width)
-
-        # 最后一列（截图列）设置为拉伸模式，自动填充剩余空间
-        header.setSectionResizeMode(4, QHeaderView.Stretch)
-
-        # 设置表格头的最小截面大小，避免过度压缩
-        header.setMinimumSectionSize(min_last_column_width)
-
-        print(f"表格列宽设置: 可用宽度={available_width}px, 前4列统一宽度={uniform_width}px, 最后列宽度={actual_last_column_width}px (范围:{min_last_column_width}-{max_last_column_width}px)")
 
     def updateButtonStyles(self, button_width):
         """更新按钮样式以适应新宽度 - 现在使用内联样式，此函数保留以兼容性"""
@@ -3179,8 +3116,6 @@ class MyViz(QMainWindow):
 
         # 延迟更新图像尺寸以适应侧边栏变化
         QTimer.singleShot(300, self.updateImageSizes)
-        # 延迟更新表格列宽
-        QTimer.singleShot(350, self.setupTableColumnWidths)
     
     def toggleRightSidebar(self, hide=None, animate=False):
         """显示或隐藏右侧栏
@@ -3317,8 +3252,6 @@ class MyViz(QMainWindow):
 
         # 延迟更新图像尺寸以适应侧边栏变化
         QTimer.singleShot(250, self.updateImageSizes)
-        # 延迟更新表格列宽
-        QTimer.singleShot(300, self.setupTableColumnWidths)
                 
     def finishRightSidebarAnimation(self, expanded):
         """右侧栏动画结束后的处理
@@ -3731,9 +3664,9 @@ class MyViz(QMainWindow):
                 "velocity": False,
                 "camera": False,
                 "depth": False,
-                "bird_view": False,
-                "marker": False
+                "bird_view": False
             }
+
             
             # 重置相关UI元素显示状态
             # 如果有电池状态显示，重置为初始状态
@@ -3786,8 +3719,8 @@ class MyViz(QMainWindow):
             self.topic_subscriber.register_callback("camera", self._thread_safe_camera_callback)
             self.topic_subscriber.register_callback("depth", self._thread_safe_depth_callback)
             self.topic_subscriber.register_callback("bird_view", self._thread_safe_bird_view_callback)
-            self.topic_subscriber.register_callback("marker", self._thread_safe_marker_callback)
             self.topic_subscriber.register_callback("attitude", self._thread_safe_attitude_callback)
+
             self.topic_subscriber.register_callback("obstacle_states", self._thread_safe_obstacle_callback)
             
             # 注意：已移除MAVROS话题回调，使用普通话题替代
@@ -3944,255 +3877,8 @@ class MyViz(QMainWindow):
         if hasattr(self, 'bird_view_label'):
             self.bird_view_label.setText(f"<div style='font-size: 12pt; color: #3498DB; text-align: center; margin-top: 50px;'>{message}</div>")
     
-    # 添加人员位置管理功能
-    def addPerson(self):
-        """添加搜索人员位置"""
-        # 创建对话框
-        dialog = QDialog(self)
-        dialog.setWindowTitle("添加待搜索人员")
-        dialog.setFixedWidth(300)
-        dialog.setStyleSheet("""
-            QDialog {
-                background-color: #1E2330;
-                color: #FFFFFF;
-            }
-            QLabel {
-                color: #FFFFFF;
-                font-size: 12px;
-            }
-            QLineEdit {
-                padding: 5px;
-                border: 1px solid #3498DB;
-                border-radius: 3px;
-                background-color: #2C3E50;
-                color: white;
-                selection-background-color: #3498DB;
-            }
-            QPushButton {
-                background-color: #2980B9;
-                color: white;
-                border-radius: 4px;
-                padding: 5px 15px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #3498DB;
-            }
-            QComboBox {
-                padding: 5px;
-                border: 1px solid #3498DB;
-                border-radius: 3px;
-                background-color: #2C3E50;
-                color: white;
-            }
-            QComboBox::drop-down {
-                border: 0px;
-            }
-            QComboBox::down-arrow {
-                image: url(:/images/icons/dropdown.svg);
-                width: 12px;
-                height: 12px;
-            }
-            QComboBox QAbstractItemView {
-                background-color: #2C3E50;
-                color: white;
-                selection-background-color: #3498DB;
-                border: 1px solid #3498DB;
-            }
-        """)
-        
-        # 创建对话框布局
-        layout = QVBoxLayout(dialog)
-        
-        # 添加表单字段
-        form_layout = QFormLayout()
-        
-        # ID字段（自动生成）
-        next_id = self.position_table.rowCount() + 1
-        id_label = QLabel(f"ID: {next_id}")
-        form_layout.addRow("", id_label)
-        
-        # X坐标字段
-        x_edit = QLineEdit()
-        x_edit.setValidator(QDoubleValidator())  # 接受浮点数
-        form_layout.addRow("X坐标:", x_edit)
-        
-        # Y坐标字段
-        y_edit = QLineEdit()
-        y_edit.setValidator(QDoubleValidator())  # 接受浮点数
-        form_layout.addRow("Y坐标:", y_edit)
-        
-        # 状态字段
-        status_combo = QComboBox()
-        status_combo.addItems(["待确认", "已确认", "已救援"])
-        form_layout.addRow("状态:", status_combo)
-        
-        layout.addLayout(form_layout)
-        
-        # 添加按钮区
-        button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-        button_box.accepted.connect(dialog.accept)
-        button_box.rejected.connect(dialog.reject)
-        layout.addWidget(button_box)
-        
-        # 执行对话框
-        if dialog.exec_() == QDialog.Accepted:
-            try:
-                # 获取输入值
-                x_value = x_edit.text()
-                y_value = y_edit.text()
-                status = status_combo.currentText()
-                
-                # 验证输入
-                if not x_value or not y_value:
-                    QMessageBox.warning(self, "输入错误", "X坐标和Y坐标不能为空")
-                    return
-                    
-                # 添加到表格
-                row_position = self.position_table.rowCount()
-                self.position_table.insertRow(row_position)
-                
-                # 设置单元格值
-                self.position_table.setItem(row_position, 0, QTableWidgetItem(str(next_id)))
-                self.position_table.setItem(row_position, 1, QTableWidgetItem(x_value))
-                self.position_table.setItem(row_position, 2, QTableWidgetItem(y_value))
-                status_item = QTableWidgetItem(status)
-                
-                # 设置状态颜色
-                if status == "待确认":
-                    status_item.setForeground(QBrush(QColor("#F39C12")))  # 橙色
-                elif status == "已确认":
-                    status_item.setForeground(QBrush(QColor("#2ECC71")))  # 绿色
-                elif status == "已救援":
-                    status_item.setForeground(QBrush(QColor("#3498DB")))  # 蓝色
-                    
-                self.position_table.setItem(row_position, 3, status_item)
-                
-                print(f"已添加新的搜索人员: ID={next_id}, X={x_value}, Y={y_value}, 状态={status}")
-            except Exception as e:
-                print(f"添加人员时出错: {str(e)}")
-                QMessageBox.critical(self, "错误", f"添加人员时出错: {str(e)}")
-    
-    def removePerson(self):
-        """删除选中的搜索人员"""
-        # 获取选中的行
-        selected_rows = set()
-        for item in self.position_table.selectedItems():
-            selected_rows.add(item.row())
-        
-        if not selected_rows:
-            QMessageBox.warning(self, "提示", "请先选择要删除的人员")
-            return
-        
-        # 确认是否删除
-        confirm = QMessageBox.question(self, "确认删除", 
-                                     f"确定要删除选中的{len(selected_rows)}个人员吗？", 
-                                     QMessageBox.Yes | QMessageBox.No)
-        
-        if confirm == QMessageBox.Yes:
-            # 从后向前删除行(避免索引变化)
-            for row in sorted(selected_rows, reverse=True):
-                person_id = self.position_table.item(row, 0).text()
-                self.position_table.removeRow(row)
-                print(f"已删除ID为{person_id}的人员记录")
-    
-    def updatePersonStatus(self):
-        """更新选中人员的状态"""
-        # 获取选中的行
-        selected_items = self.position_table.selectedItems()
-        
-        if not selected_items:
-            QMessageBox.warning(self, "提示", "请先选择要更新的人员")
-            return
-            
-        # 获取唯一的行
-        selected_rows = set()
-        for item in selected_items:
-            selected_rows.add(item.row())
-        
-        if len(selected_rows) > 1:
-            # 创建状态选择对话框
-            dialog = QDialog(self)
-            dialog.setWindowTitle("批量更新状态")
-            dialog.setFixedWidth(250)
-            dialog.setStyleSheet("""
-                QDialog {
-                    background-color: #1E2330;
-                    color: #FFFFFF;
-                }
-                QLabel {
-                    color: #FFFFFF;
-                    font-size: 12px;
-                }
-                QPushButton {
-                    background-color: #2980B9;
-                    color: white;
-                    border-radius: 4px;
-                    padding: 5px 15px;
-                    font-weight: bold;
-                }
-                QPushButton:hover {
-                    background-color: #3498DB;
-                }
-                QComboBox {
-                    padding: 5px;
-                    border: 1px solid #3498DB;
-                    border-radius: 3px;
-                    background-color: #2C3E50;
-                    color: white;
-                }
-            """)
-            
-            layout = QVBoxLayout(dialog)
-            
-            # 状态选择
-            layout.addWidget(QLabel(f"为{len(selected_rows)}个选中人员设置新状态:"))
-            status_combo = QComboBox()
-            status_combo.addItems(["待确认", "已确认", "已救援"])
-            layout.addWidget(status_combo)
-            
-            # 按钮
-            button_box = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
-            button_box.accepted.connect(dialog.accept)
-            button_box.rejected.connect(dialog.reject)
-            layout.addWidget(button_box)
-            
-            # 执行对话框
-            if dialog.exec_() == QDialog.Accepted:
-                new_status = status_combo.currentText()
-                # 更新所有选中行的状态
-                for row in selected_rows:
-                    self._updateRowStatus(row, new_status)
-        else:
-            # 单行更新，直接循环状态
-            row = list(selected_rows)[0]
-            current_status = self.position_table.item(row, 3).text()
-            
-            # 状态循环: 待确认 -> 已确认 -> 已救援 -> 待确认
-            if current_status == "待确认":
-                new_status = "已确认"
-            elif current_status == "已确认":
-                new_status = "已救援"
-            else:
-                new_status = "待确认"
-            
-            self._updateRowStatus(row, new_status)
-    
-    def _updateRowStatus(self, row, new_status):
-        """更新指定行的状态"""
-        person_id = self.position_table.item(row, 0).text()
-        status_item = QTableWidgetItem(new_status)
-        
-        # 设置状态颜色
-        if new_status == "待确认":
-            status_item.setForeground(QBrush(QColor("#F39C12")))  # 橙色
-        elif new_status == "已确认":
-            status_item.setForeground(QBrush(QColor("#2ECC71")))  # 绿色
-        elif new_status == "已救援":
-            status_item.setForeground(QBrush(QColor("#3498DB")))  # 蓝色
-            
-        self.position_table.setItem(row, 3, status_item)
-        print(f"已将ID为{person_id}的人员状态更新为{new_status}")
+
+
     
     def onResize(self, event):
         """窗口大小变化时调整组件尺寸"""
@@ -4239,8 +3925,6 @@ class MyViz(QMainWindow):
 
                     # 延迟更新图像尺寸，确保分割器调整完成后再更新
                     QTimer.singleShot(200, self.updateImageSizes)
-                    # 延迟更新表格列宽
-                    QTimer.singleShot(250, self.setupTableColumnWidths)
                     # 延迟更新悬浮窗口位置
                     QTimer.singleShot(300, self._update_overlay_positions)
 
@@ -4260,147 +3944,8 @@ class MyViz(QMainWindow):
     
 
 
-    def marker_callback(self, marker_data):
-        """处理visualization_marker话题的回调函数 - 安全版本"""
-        try:
-            # 验证输入数据
-            if not marker_data or not isinstance(marker_data, dict):
-                print("标记数据无效或为空")
-                return
 
-            # 安全地提取标记ID
-            if "id" not in marker_data:
-                print("标记数据中缺少ID字段")
-                return
 
-            marker_id = marker_data["id"]
-            if not isinstance(marker_id, int):
-                print(f"标记ID不是整数: {marker_id}")
-                return
-
-            if marker_id % 2 == 0:  # 球体标记的ID是偶数
-                ball_id = marker_id // 2  # 获取实际的球体ID
-
-                # 检查是否已添加过该标记
-                if ball_id not in self.detected_markers:
-                    # 安全地获取小球坐标
-                    try:
-                        x = marker_data["pose"]["position"]["x"]
-                        y = marker_data["pose"]["position"]["y"]
-                        z = marker_data["pose"]["position"]["z"]
-
-                        # 验证坐标是否为有效数值
-                        if not all(isinstance(coord, (int, float)) for coord in [x, y, z]):
-                            print(f"坐标数据无效: x={x}, y={y}, z={z}")
-                            return
-
-                    except (KeyError, TypeError) as e:
-                        print(f"提取坐标数据时出错: {str(e)}")
-                        return
-
-                    # 添加到表格中
-                    self._add_marker_to_table(ball_id, x, y, z)
-
-                    # 标记为已添加
-                    self.detected_markers.add(ball_id)
-
-                    print(f"检测到新的标记点: ID={ball_id}, 位置: x={x:.2f}, y={y:.2f}, z={z:.2f}")
-
-        except Exception as e:
-            print(f"处理标记点数据时出错: {str(e)}")
-            import traceback
-            traceback.print_exc()
-
-    def _add_marker_to_table(self, ball_id, x, y, z):
-        """将检测到的标记点添加到人员位置表格"""
-        try:
-            # 获取表格当前行数
-            row_position = self.position_table.rowCount()
-            self.position_table.insertRow(row_position)
-            
-            # 设置单元格值
-            self.position_table.setItem(row_position, 0, QTableWidgetItem(str(ball_id)))
-            self.position_table.setItem(row_position, 1, QTableWidgetItem(f"{x:.2f} m"))
-            self.position_table.setItem(row_position, 2, QTableWidgetItem(f"{y:.2f} m"))
-            
-            # 设置状态为"待确认"
-            status_item = QTableWidgetItem("待确认")
-            status_item.setForeground(QBrush(QColor("#F39C12")))  # 橙色
-            self.position_table.setItem(row_position, 3, status_item)
-            
-            # 查找预先保存的截图
-            screenshot_status = self.load_ball_screenshot(ball_id)
-            screenshot_item = QTableWidgetItem(screenshot_status)
-            if screenshot_status == "查看截图":
-                screenshot_item.setForeground(QBrush(QColor("#27AE60")))  # 绿色表示有截图
-            else:
-                screenshot_item.setForeground(QBrush(QColor("#E74C3C")))  # 红色表示无截图
-            self.position_table.setItem(row_position, 4, screenshot_item)
-            
-            print(f"已添加标记点到表格: ID={ball_id}, X={x:.2f}, Y={y:.2f}, Z={z:.2f}")
-            
-            # 自动滚动到新添加的行
-            self.position_table.scrollToItem(self.position_table.item(row_position, 0))
-        except Exception as e:
-            print(f"添加标记点到表格时出错: {str(e)}")
-            import traceback
-            traceback.print_exc()
-
-            # 如果添加行失败，尝试清理
-            try:
-                if hasattr(self, 'position_table') and self.position_table:
-                    current_rows = self.position_table.rowCount()
-                    if current_rows > 0:
-                        # 检查最后一行是否为空，如果是则删除
-                        last_row = current_rows - 1
-                        if self.position_table.item(last_row, 0) is None:
-                            self.position_table.removeRow(last_row)
-            except:
-                pass  # 忽略清理时的错误
-            
-    def load_ball_screenshot(self, ball_id):
-        """加载小球的预先保存的截图"""
-        try:
-            # 检查ball_screenshots目录中是否有对应的截图文件
-            ball_screenshots_dir = get_data_directory("ball_screenshots")
-
-            if not os.path.exists(ball_screenshots_dir):
-                print(f"截图目录不存在: {ball_screenshots_dir}")
-                return "无截图"
-
-            # 查找以ball_{ball_id}_开头的文件
-            import glob
-            pattern = os.path.join(ball_screenshots_dir, f"ball_{ball_id}_*.jpg")
-            matching_files = glob.glob(pattern)
-
-            if matching_files:
-                # 如果找到多个文件，选择最新的
-                latest_file = max(matching_files, key=os.path.getctime)
-
-                # 验证文件是否可读
-                if os.path.exists(latest_file) and os.path.getsize(latest_file) > 0:
-                    # 存储截图信息
-                    self.ball_screenshots[ball_id] = {
-                        "path": latest_file,
-                        "timestamp": os.path.getctime(latest_file)
-                    }
-                    print(f"找到小球 {ball_id} 的截图: {latest_file}")
-                    return "查看截图"
-                else:
-                    print(f"截图文件损坏或为空: {latest_file}")
-                    return "截图损坏"
-            else:
-                print(f"未找到小球 {ball_id} 的截图文件")
-                return "无截图"
-
-        except Exception as e:
-            print(f"加载小球截图时出错: {str(e)}")
-            return "加载失败"
-
-    def capture_ball_screenshot(self, ball_id):
-        """拍摄小球截图并保存（已弃用，现在使用预先保存的截图）"""
-        # 这个函数现在不再使用，因为截图是在检测过程中预先保存的
-        print(f"注意: capture_ball_screenshot 已弃用，小球 {ball_id} 的截图应该已经预先保存")
 
     def stopDroneSystem(self):
         """停止无人机系统"""
@@ -4760,9 +4305,9 @@ class MyViz(QMainWindow):
                 "velocity": False,
                 "camera": False,
                 "depth": False,
-                "bird_view": False,
-                "marker": False
+                "bird_view": False
             }           
+
         except Exception as e:
             if 'progress_dialog' in locals() and progress_dialog is not None:
                 try:
@@ -5400,9 +4945,9 @@ class MyViz(QMainWindow):
                         "velocity": False,
                         "camera": False,
                         "depth": False,
-                        "bird_view": False,
-                        "marker": False
+                        "bird_view": False
                     }
+
                     print("已关闭话题订阅器并重置话题数据状态")
                 except Exception as e:
                     print(f"关闭话题订阅器时出错: {str(e)}")
@@ -5797,176 +5342,11 @@ class MyViz(QMainWindow):
         self.enable_sidebar_hover = True
         print("鼠标跟踪已启用，左右侧栏已锁定并打开")
 
-    def on_position_table_cell_clicked(self, row, column):
-        """处理位置表格单元格点击事件"""
-        try:
-            # 只处理截图列的点击
-            if column == 4:  # 截图列
-                # 安全地获取ball_id
-                item = self.position_table.item(row, 0)
-                if item is None:
-                    print(f"表格行 {row} 的ID列为空")
-                    return
 
-                try:
-                    ball_id = int(item.text())
-                except ValueError:
-                    print(f"无法解析ball_id: {item.text()}")
-                    return
 
-                # 检查截图列的内容
-                screenshot_item = self.position_table.item(row, 4)
-                if screenshot_item is None or screenshot_item.text() != "查看截图":
-                    print(f"小球 {ball_id} 没有可用的截图")
-                    return
-
-                if ball_id in self.ball_screenshots:
-                    # 显示截图对话框
-                    self.show_screenshot_dialog(ball_id)
-                else:
-                    print(f"未找到小球 {ball_id} 的截图数据")
-
-        except Exception as e:
-            print(f"处理表格点击事件时出错: {str(e)}")
-            import traceback
-            traceback.print_exc()
-    
-    def show_screenshot_dialog(self, ball_id):
-        """显示小球截图对话框"""
-        try:
-            if ball_id not in self.ball_screenshots:
-                print(f"未找到小球 {ball_id} 的截图数据")
-                return
-
-            # 获取截图数据
-            screenshot_data = self.ball_screenshots[ball_id]
-
-            # 创建对话框
-            dialog = QDialog(self)
-
-            # 保存对话框引用，防止被垃圾回收
-            if not hasattr(self, 'screenshot_dialogs'):
-                self.screenshot_dialogs = []
-            self.screenshot_dialogs.append(dialog)
-            dialog.setWindowTitle(f"小球ID {ball_id} 截图")
-            dialog.setMinimumSize(640, 480)
-            dialog.setModal(False)  # 设置为非模态对话框，允许自由拖动
-
-            # 设置窗口标志，确保可以拖动和调整大小
-            dialog.setWindowFlags(Qt.Window | Qt.WindowTitleHint | Qt.WindowCloseButtonHint |
-                                Qt.WindowMinMaxButtonsHint | Qt.WindowSystemMenuHint)
-
-            # 设置窗口可调整大小
-            dialog.setSizeGripEnabled(True)
-
-            # 创建布局
-            layout = QVBoxLayout(dialog)
-
-            # 创建图像标签
-            image_label = QLabel()
-            image_label.setAlignment(Qt.AlignCenter)
-            image_label.setStyleSheet("border: 1px solid #3498DB; background-color: #1E2330;")
-
-            # 安全地加载和显示图像
-            success = False
-            if "path" in screenshot_data and os.path.exists(screenshot_data["path"]):
-                try:
-                    # 使用OpenCV安全地加载图像
-                    cv_image = cv2.imread(screenshot_data["path"])
-                    if cv_image is not None:
-                        # 转换颜色格式从BGR到RGB
-                        rgb_image = cv2.cvtColor(cv_image, cv2.COLOR_BGR2RGB)
-                        height, width, channel = rgb_image.shape
-
-                        # 创建QImage时确保数据连续性
-                        bytes_per_line = 3 * width
-                        q_image = QImage(rgb_image.data, width, height, bytes_per_line, QImage.Format_RGB888)
-
-                        # 创建QPixmap的副本以确保数据安全
-                        pixmap = QPixmap.fromImage(q_image.copy())
-
-                        if not pixmap.isNull():
-                            # 缩放图像以适应对话框
-                            scaled_pixmap = pixmap.scaled(600, 400, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-                            image_label.setPixmap(scaled_pixmap)
-                            success = True
-                            print(f"成功加载小球 {ball_id} 的截图")
-                        else:
-                            print(f"创建QPixmap失败: {screenshot_data['path']}")
-                    else:
-                        print(f"OpenCV无法读取图像文件: {screenshot_data['path']}")
-                except Exception as e:
-                    print(f"加载截图时出错: {str(e)}")
-
-            if not success:
-                # 如果加载失败，显示错误信息
-                image_label.setText(f"""
-                    <div style='
-                        color: #E74C3C;
-                        font-size: 16pt;
-                        text-align: center;
-                        padding: 50px;
-                    '>
-                        截图加载失败<br>
-                        小球ID: {ball_id}
-                    </div>
-                """)
-
-            # 添加到布局
-            layout.addWidget(image_label)
-
-            # 添加关闭按钮
-            close_button = QPushButton("关闭")
-            close_button.setStyleSheet("""
-                QPushButton {
-                    background-color: #3498DB;
-                    color: white;
-                    border: none;
-                    border-radius: 4px;
-                    padding: 8px 16px;
-                    font-weight: bold;
-                }
-                QPushButton:hover {
-                    background-color: #2980B9;
-                }
-            """)
-            # 连接关闭按钮，确保正确清理对话框
-            def close_dialog():
-                if hasattr(self, 'screenshot_dialogs') and dialog in self.screenshot_dialogs:
-                    self.screenshot_dialogs.remove(dialog)
-                dialog.close()
-
-            close_button.clicked.connect(close_dialog)
-            layout.addWidget(close_button)
-
-            # 设置对话框关闭事件处理
-            def on_dialog_close(event):
-                if hasattr(self, 'screenshot_dialogs') and dialog in self.screenshot_dialogs:
-                    self.screenshot_dialogs.remove(dialog)
-                event.accept()
-
-            dialog.closeEvent = on_dialog_close
-
-            # 显示对话框（非阻塞方式）
-            dialog.show()
-            dialog.raise_()  # 将窗口提到前台
-            dialog.activateWindow()  # 激活窗口
-
-        except Exception as e:
-            print(f"显示截图对话框时出错: {str(e)}")
-            # 显示错误对话框
-            error_dialog = QDialog(self)
-            error_dialog.setWindowTitle("错误")
-            error_dialog.setMinimumSize(300, 150)
-            error_layout = QVBoxLayout(error_dialog)
-            error_label = QLabel(f"显示截图时出错:\n{str(e)}")
-            error_layout.addWidget(error_label)
-            error_button = QPushButton("确定")
-            error_button.clicked.connect(error_dialog.accept)
-            error_layout.addWidget(error_button)
-            error_dialog.exec_()
 
     # 注意：closeEvent方法已在上面优化实现，删除重复代码
+
 
 ## Start the Application
 ## ^^^^^^^^^^^^^^^^^^^^^
