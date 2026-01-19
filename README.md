@@ -1,183 +1,146 @@
-# 无人机自主搜索系统
+# 无人机自主导航系统
 
-一个基于ROS的无人机自主搜索和救援系统，具有实时图像处理、目标跟踪和可视化功能。
-
-## 📺 演示视频
-
-### 无人机动静态障碍物规避
-
-https://github.com/user-attachments/assets/80bd5307-e49a-4b9f-a653-79bdc4324bec
-
-### 完整自主搜索系统流程展示
-
-https://github.com/user-attachments/assets/90228ca9-0f2d-461a-ae5d-ae7e6a1f474c
+一个基于 ROS 的无人机自主导航可视化系统，集成 RViz 3D 显示、实时数据监控和动态障碍物跟踪功能。
 
 ## ✨ 主要功能
 
-- 🚁 **无人机控制**: 完整的无人机飞行控制系统
-- 📷 **实时图像处理**: RGB和深度图像实时显示和处理
-- 🎯 **目标跟踪**: 智能目标检测和位置跟踪
-- 📊 **数据可视化**: RViz 3D可视化和实时数据显示
-- 💾 **截图功能**: 自动截图和图像管理
-- 📝 **日志记录**: 完整的系统日志和数据记录
+- 🚁 **导航控制**: 一键启动导航系统、设置目标点、一键返航
+- 📷 **实时图像**: RGB 图像、深度图像、鸟瞰图显示
+- 🎯 **障碍物跟踪**: 实时显示动态障碍物距离、速度、加速度
+- 📊 **数据可视化**: RViz 3D 可视化和飞行数据仪表盘
+- **话题监控**: ROS 话题实时日志记录
 
-## 🚀 快速开始
+## 🚀 启动方式
 
-### 一键安装
 ```bash
-# 克隆项目（如果需要）
-git clone <repository-url>
-cd explore_system
+# 确保ROS环境已配置
+source /opt/ros/noetic/setup.bash
+source ~/catkin_ws_dyn/devel/setup.bash
 
-# 运行一键安装脚本
-./quick_install.sh
+# 启动程序
+cd ~/explore_system
+python3 start.py
 ```
-
-### 手动安装
-详细的手动安装步骤请参考 [打包安装说明.md](./打包安装说明.md)
-
-## 📋 系统要求
-
-- **操作系统**: Ubuntu 20.04 LTS
-- **ROS版本**: ROS Noetic
-- **Python**: 3.8+
-- **内存**: 4GB+ RAM
-- **存储**: 2GB+ 可用空间
-
-## 🎮 使用方法
-
-### 启动程序
-```bash
-# 方法1: 通过桌面图标启动
-# 在应用程序菜单中搜索"无人机自主搜索系统"
-
-# 方法2: 命令行启动
-~/drone_search_system/run_drone_system.sh
-
-# 方法3: 直接运行
-~/drone_search_system/drone_search_system
-```
-
-### 基本操作
-1. **启动系统**: 点击"一键启动"按钮
-2. **图像切换**: 使用RGB/深度图像切换按钮
-3. **开始探索**: 点击"开始探索"按钮
-4. **查看截图**: 在人员位置表格中点击"查看截图"
-5. **停止系统**: 点击"停止程序"按钮
 
 ## 📁 项目结构
 
 ```
 explore_system/
 ├── start.py                    # 主程序入口
-├── dashboard.py               # 仪表盘UI组件
+├── dashboard.py               # 控制中心UI组件
 ├── topics_subscriber.py       # ROS话题订阅器
-├── topic_logger.py           # 日志记录器
-├── ball_pose_tracker.py      # 目标位置跟踪器
-├── build_executable.py       # 打包脚本
-├── quick_install.sh          # 快速安装脚本
-├── install_desktop_icon.sh   # 桌面图标安装脚本
-├── topics_config.json        # 话题配置文件
-├── my_config.rviz           # RViz配置文件
-├── logo.png                 # 程序图标
-├── resource/                # 资源文件目录
-├── 打包安装说明.md           # 详细安装说明
-└── README.md               # 项目说明文件
+├── topic_logger.py           # 话题日志记录器
+├── waypoint_dialog.py        # 目标点设置对话框
+├── topics_config.json        # 话题配置文件 ⚠️ 需要修改
+├── my_config.rviz           # RViz配置文件 ⚠️ 需要修改
+└── README.md
 ```
 
-## 🔧 配置说明
+## 🔧 集成到您的工程
 
-### 话题配置
-编辑 `topics_config.json` 来配置ROS话题：
+### 1. 修改话题配置 (`topics_config.json`)
+
+根据您的工程修改以下话题：
+
 ```json
 {
-    "camera": {
-        "topic": "/image_converter/output_video",
-        "msg_type": "sensor_msgs/Image"
-    },
-    "depth": {
-        "topic": "/camera/depth/image_rect_raw",
-        "msg_type": "sensor_msgs/Image"
-    }
+  "battery": {
+    "topic": "/mavros/battery", // 电池状态话题
+    "msg_type": "sensor_msgs/BatteryState"
+  },
+  "status": {
+    "topic": "/mavros/state", // 飞控状态话题
+    "msg_type": "mavros_msgs/State"
+  },
+  "odometry": {
+    "topic": "/vins_fusion/imu_propagate", // 里程计话题
+    "msg_type": "nav_msgs/Odometry"
+  },
+  "velocity": {
+    "topic": "/mavros/local_position/velocity_local", // 速度话题
+    "msg_type": "geometry_msgs/TwistStamped"
+  },
+  "camera": {
+    "topic": "/camera/color/image_raw", // RGB相机话题
+    "msg_type": "sensor_msgs/Image"
+  },
+  "depth": {
+    "topic": "/camera/depth_aligned_to_color_and_infra1/image_raw", // 深度相机话题
+    "msg_type": "sensor_msgs/Image"
+  },
+  "attitude": {
+    "topic": "/mavros/imu/data", // IMU姿态话题
+    "msg_type": "sensor_msgs/Imu"
+  },
+  "fsm_state": {
+    "topic": "/drone_0_ego_planner_node/planning/fsm_state", // 规划器FSM状态
+    "msg_type": "std_msgs/Int32"
+  },
+  "obstacle_states": {
+    "topic": "/onboard_detector/states", // 动态障碍物状态
+    "msg_type": "obj_state_msgs/ObjectsStates"
+  }
 }
 ```
 
-### 目标跟踪参数
-编辑 `ball_pose_tracker.py` 顶部的全局参数：
+### 2. 修改 RViz 配置 (`my_config.rviz`)
+
+根据您的需求修改 RViz 显示项：
+
+- Fixed Frame: 修改为您的世界坐标系 (如 `world`)
+- 添加您需要的 Display (如 TF、Path、PointCloud2 等)
+
+### 3. 修改启动命令 (`start.py`)
+
+在 `startDroneSystem()` 函数中修改导航系统启动命令：
+
 ```python
-MIN_POSITIONS_FOR_PROCESSING = 3    # 最少处理帧数
-DETECTION_TIMEOUT_SECONDS = 1.0     # 检测超时时间
-POSITION_THRESHOLD_METERS = 1.5     # 位置阈值
+# 查找 PROCESS_PATTERNS 列表，根据您的启动流程修改
+# 查找 startDroneSystem 函数，修改 roslaunch 命令
 ```
 
-## 📊 数据目录
+### 4. 修改目标点发布话题
 
-程序运行时会创建以下目录：
-- `ball_screenshots/`: 目标截图保存目录
-- `screenshots/`: 一般截图保存目录
-- `log/`: 系统日志文件目录
+在 `waypoint_dialog.py` 中修改目标点发布话题：
+
+```python
+self.goal_publisher = rospy.Publisher(
+    '/move_base_simple/goal',  # 修改为您的目标点话题
+    PoseStamped,
+    queue_size=10
+)
+```
+
+## � 依赖要求
+
+- Ubuntu 20.04 LTS
+- ROS Noetic
+- Python 3.8+
+- PyQt5
+- opencv-python
+- numpy
+
+```bash
+# 安装Python依赖
+pip3 install numpy opencv-python psutil PyQt5
+```
+
+## 🎮 操作说明
+
+| 按钮     | 功能                        |
+| -------- | --------------------------- |
+| 一键启动 | 启动导航系统所有节点        |
+| 前往目标 | 打开目标点设置对话框        |
+| 一键返航 | 返回原点(0,0,0.8)并自动降落 |
+| 停止程序 | 停止所有导航节点            |
+| 导入点云 | (待实现)                    |
 
 ## 🐛 故障排除
 
-### 常见问题
-
-1. **程序无法启动**
-   ```bash
-   # 检查ROS环境
-   source /opt/ros/noetic/setup.bash
-   roscore &
-   ```
-
-2. **图像不显示**
-   - 检查摄像头连接
-   - 验证话题是否发布：`rostopic list`
-   - 检查话题配置文件
-
-3. **权限错误**
-   ```bash
-   chmod +x ~/drone_search_system/drone_search_system
-   chmod +x ~/drone_search_system/run_drone_system.sh
-   ```
-
-4. **依赖缺失**
-   ```bash
-   pip3 install numpy opencv-python psutil PyQt5
-   ```
-
-### 调试模式
-```bash
-# 在终端中运行以查看详细输出
-cd ~/drone_search_system
-./drone_search_system
-```
-
-## 📝 开发说明
-
-### 开发环境设置
-```bash
-# 安装开发依赖
-pip3 install -r requirements.txt
-
-# 设置ROS环境
-source /opt/ros/noetic/setup.bash
-```
-
-### 代码结构
-- `start.py`: 主程序，包含UI和系统控制逻辑
-- `dashboard.py`: 自定义UI组件
-- `topics_subscriber.py`: ROS话题订阅和数据处理
-- `ball_pose_tracker.py`: 目标跟踪算法
-
-### 打包新版本
-```bash
-# 修改代码后重新打包
-python3 build_executable.py
-```
+1. **话题不显示**: 检查 `topics_config.json` 中的话题名称是否正确
+2. **RViz 显示异常**: 检查 `my_config.rviz` 中的 Fixed Frame 设置
+3. **障碍物列表不更新**: 确保 `obj_state_msgs` 消息包已编译
 
 ## 📄 许可证
 
-本项目采用 MIT 许可证 - 详见 [LICENSE](LICENSE) 文件
-
-## 🤝 贡献
-
-欢迎提交 Issue 和 Pull Request！
+MIT License
