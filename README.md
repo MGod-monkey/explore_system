@@ -1,157 +1,157 @@
-# 无人机自主导航系统
+# 🚁 explore_system
 
-一个基于 ROS 的无人机自主导航可视化系统，集成 RViz 3D 显示、实时数据监控和动态障碍物跟踪功能。
+一个基于 **ROS Noetic + PyQt5 + RViz** 的无人机导航可视化与控制系统。  
+适用于仿真/实机调试场景，支持一键启动流程、实时状态监控、图像显示、动态障碍物跟踪与话题日志记录。
 
-## ✨ 主要功能
+---
 
-- 🚁 **导航控制**: 一键启动导航系统、设置目标点、一键返航
-- 📷 **实时图像**: RGB 图像、深度图像、鸟瞰图显示
-- 🎯 **障碍物跟踪**: 实时显示动态障碍物距离、速度、加速度
-- 📊 **数据可视化**: RViz 3D 可视化和飞行数据仪表盘
-- **话题监控**: ROS 话题实时日志记录
+## ✨ 功能概览
 
-## 🚀 启动方式
+- **一键流程控制**：按配置顺序启动/停止多进程（飞控、预测器、规划器等）
+- **可视化控制台**：集成 RViz + 仪表面板 + 状态信息
+- **多路图像显示**：RGB、深度、鸟瞰图实时刷新
+- **障碍物监测**：展示障碍物距离、速度、加速度等信息
+- **飞行任务操作**：目标点设置、一键返航、运行状态监控
+- **话题日志系统**：关键 ROS Topic 订阅与日志落盘
+
+---
+
+## 🧱 技术栈
+
+- Ubuntu 20.04
+- ROS Noetic
+- Python 3.8+
+- PyQt5
+- OpenCV / NumPy / psutil
+
+---
+
+## 📁 项目结构
+
+```text
+explore_system/
+├── start.py                 # 主入口（启动 UI + 系统流程）
+├── dashboard.py             # 控制中心 UI
+├── manual_controller.py     # 手动控制模块
+├── waypoint_dialog.py       # 目标点设置对话框
+├── topics_subscriber.py     # ROS 话题订阅器
+├── topic_logger.py          # 话题日志记录
+├── utils.py                 # 通用工具与常量
+├── processes_config.json    # 进程启动/停止配置
+├── topics_config.json       # 话题映射配置
+├── my_config.rviz           # RViz 配置
+├── quick_install.sh         # 一键安装脚本（依赖 + 打包 + 桌面图标）
+└── resource/                # UI 资源文件
+```
+
+---
+
+## 🚀 快速开始
+
+### 1) 环境准备
 
 ```bash
-# 确保ROS环境已配置
 source /opt/ros/noetic/setup.bash
 source ~/catkin_ws_dyn/devel/setup.bash
+```
 
-# 启动程序
+### 2) 安装 Python 依赖
+
+```bash
+pip3 install numpy opencv-python psutil PyQt5
+```
+
+### 3) 启动程序
+
+```bash
 cd ~/explore_system
 python3 start.py
 ```
 
-## 📁 项目结构
+> 如果你希望一键安装与打包，可使用：
+>
+> ```bash
+> bash quick_install.sh
+> ```
 
-```
-explore_system/
-├── start.py                    # 主程序入口
-├── utils.py                   # 工具函数和常量 (新)
-├── processes_config.json      # 进程配置文件 (新)
-├── dashboard.py               # 控制中心UI组件
-├── topics_subscriber.py       # ROS话题订阅器
-├── topic_logger.py           # 话题日志记录器
-├── waypoint_dialog.py        # 目标点设置对话框
-├── topics_config.json        # 话题配置文件 ⚠️ 需要修改
-├── my_config.rviz           # RViz配置文件 ⚠️ 需要修改
-└── README.md
-```
+---
 
-## 🔧 集成到您的工程
+## ⚙️ 关键配置
 
-### 1. 修改话题配置 (`topics_config.json`)
+### 1. `topics_config.json`（必须）
+将话题名改成你自己工程中的真实 Topic（例如电池、状态、里程计、图像、障碍物状态等）。
 
-根据您的工程修改以下话题：
+重点检查：
+- `battery.topic`
+- `status.topic`
+- `odometry.topic`
+- `camera.topic`
+- `depth.topic`
+- `bird_view.topic`
+- `obstacle_states.topic`
 
-```json
-{
-  "battery": {
-    "topic": "/mavros/battery", // 电池状态话题
-    "msg_type": "sensor_msgs/BatteryState"
-  },
-  "status": {
-    "topic": "/mavros/state", // 飞控状态话题
-    "msg_type": "mavros_msgs/State"
-  },
-  "odometry": {
-    "topic": "/vins_fusion/imu_propagate", // 里程计话题
-    "msg_type": "nav_msgs/Odometry"
-  },
-  "velocity": {
-    "topic": "/mavros/local_position/velocity_local", // 速度话题
-    "msg_type": "geometry_msgs/TwistStamped"
-  },
-  "camera": {
-    "topic": "/camera/color/image_raw", // RGB相机话题
-    "msg_type": "sensor_msgs/Image"
-  },
-  "depth": {
-    "topic": "/camera/depth_aligned_to_color_and_infra1/image_raw", // 深度相机话题
-    "msg_type": "sensor_msgs/Image"
-  },
-  "attitude": {
-    "topic": "/mavros/imu/data", // IMU姿态话题
-    "msg_type": "sensor_msgs/Imu"
-  },
-  "fsm_state": {
-    "topic": "/drone_0_ego_planner_node/planning/fsm_state", // 规划器FSM状态
-    "msg_type": "std_msgs/Int32"
-  },
-  "obstacle_states": {
-    "topic": "/onboard_detector/states", // 动态障碍物状态
-    "msg_type": "obj_state_msgs/ObjectsStates"
-  }
-}
-```
+### 2. `processes_config.json`（必须）
+定义一键启动/停止的进程列表和顺序。
 
-### 2. 修改 RViz 配置 (`my_config.rviz`)
+重点检查：
+- `catkin_workspace`：你的工作空间路径
+- `processes[].start_command`：每个节点的启动命令
+- `processes[].order`：启动顺序
+- `processes[].wait_seconds`：启动间隔
 
-将您项目的 RViz 配置文件保存（例如 `your_project.rviz`），并用它替换本项目中的 `my_config.rviz` 文件。
+### 3. `my_config.rviz`（建议）
+使用你项目对应的 RViz 配置覆盖该文件，确保显示项和坐标系匹配。
 
-### 3. 修改进程配置 (`processes_config.json`)
-
-系统启动和停止的进程现在通过配置文件进行管理。请修改 `processes_config.json`：
-
-```json
-{
-  "catkin_workspace": "~/catkin_ws_dyn", // 工作空间路径
-  "log_directory": "log", // 日志保存目录
-  "processes": [
-    {
-      "name": "px4ctrl",
-      "display_name": "PX4 飞控控制器",
-      "start_command": "roslaunch px4ctrl run_node.launch", // 启动命令
-      "wait_seconds": 5, // 启动后等待时间
-      "order": 1 // 启动顺序
-    }
-    // ... 其他进程
-  ]
-}
-```
-
-### 4. 修改目标点发布话题
-
-在 `waypoint_dialog.py` 中修改目标点发布话题：
+### 4. 目标点发布话题（按需）
+在 `waypoint_dialog.py` 中确认目标点话题，例如：
 
 ```python
 self.goal_publisher = rospy.Publisher(
-    '/move_base_simple/goal',  # 修改为您的目标点话题
+    '/move_base_simple/goal',
     PoseStamped,
     queue_size=10
 )
 ```
 
-## � 依赖要求
-
-- Ubuntu 20.04 LTS
-- ROS Noetic
-- Python 3.8+
-- PyQt5
-- opencv-python
-- numpy
-
-```bash
-# 安装Python依赖
-pip3 install numpy opencv-python psutil PyQt5
-```
+---
 
 ## 🎮 操作说明
 
-| 按钮     | 功能                        |
-| -------- | --------------------------- |
-| 一键启动 | 启动导航系统所有节点        |
-| 前往目标 | 打开目标点设置对话框        |
-| 一键返航 | 返回原点(0,0,0.8)并自动降落 |
-| 停止程序 | 停止所有导航节点            |
-| 导入点云 | (待实现)                    |
+- **一键启动**：按配置顺序启动所有核心模块
+- **前往目标**：打开目标点设置并发布目标
+- **一键返航**：回到原点并执行降落流程
+- **停止程序**：终止配置中的运行进程
 
-## 🐛 故障排除
+---
 
-1. **话题不显示**: 检查 `topics_config.json` 中的话题名称是否正确
-2. **RViz 显示异常**: 检查 `my_config.rviz` 中的 Fixed Frame 设置
-3. **障碍物列表不更新**: 确保 `obj_state_msgs` 消息包已编译
+## 🐛 常见问题
 
-## 📄 许可证
+1. **界面无数据/话题不更新**  
+   - 检查 `topics_config.json` 是否与当前系统话题一致
+   - 使用 `rostopic list` / `rostopic echo` 验证数据源
 
-MIT License
+2. **RViz 显示异常或无模型**  
+   - 检查 `my_config.rviz` 的 Fixed Frame 是否正确
+   - 确认 TF 树正常发布
+
+3. **障碍物列表不刷新**  
+   - 确认 `obj_state_msgs` 已正确编译并 source
+   - 确认 `/onboard_detector/states` 有持续输出
+
+4. **一键启动后部分节点失败**  
+   - 检查 `processes_config.json` 命令是否可单独运行
+   - 适当增大 `wait_seconds`
+
+---
+
+## 📝 开发建议
+
+- 将不同平台/场景（仿真、实机）拆分成多套 `processes_config.json`
+- 为 `topics_config.json` 增加注释模板，便于迁移到新项目
+- 建议加入启动前自检（Topic 存在性、依赖包检查）
+
+---
+
+## 📄 License
+
+MIT
